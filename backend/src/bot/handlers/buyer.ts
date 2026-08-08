@@ -4,7 +4,7 @@ import { Product } from '../../models/Product';
 import { EscrowHold } from '../../models/EscrowHold';
 import { botApi } from '../services/api';
 import { notificationService } from '../../services/notificationService';
-import { paymentService } from '../../services/paymentService';
+import { paymentService, AlreadyProcessedError } from '../../services/paymentService';
 import {
   mainMenuKeyboard,
   productActionButtons,
@@ -14,6 +14,26 @@ import {
 } from '../keyboards';
 
 export const buyerHandler = new Composer();
+
+/**
+ * Telegram callback_data is attacker-controllable (a crafted client can send arbitrary
+ * callback_query data, not just what was on the button it was shown). Every handler that
+ * acts on an escrowId taken from callback_data MUST verify the clicking user actually owns
+ * it before touching money or releasing product credentials.
+ */
+async function loadOwnedEscrow(telegramId: number, escrowId: string) {
+  const user = await User.findOne({ telegramId });
+  if (!user) return { error: 'Foydalanuvchi topilmadi' as const };
+
+  const escrow = await EscrowHold.findById(escrowId);
+  if (!escrow) return { error: 'Buyurtma topilmadi' as const };
+
+  if (escrow.buyerId.toString() !== user._id.toString()) {
+    return { error: 'Ruxsat yo\'q' as const };
+  }
+
+  return { escrow, user };
+}
 
 buyerHandler.hears('🛍 Mahsulotlar', async (ctx) => {
   const { products, total, pages } = await botApi.getActiveProducts(1, 10);
@@ -191,6 +211,12 @@ ${statusEmoji} <b>${product?.title || 'Noma\'lum mahsulot'}</b>
 buyerHandler.action(/^confirm_escrow_(.+)$/, async (ctx) => {
   try {
     const escrowId = ctx.match[1];
+    const owned = await loadOwnedEscrow(ctx.from!.id, escrowId);
+    if ('error' in owned) {
+      await ctx.answerCbQuery(owned.error);
+      return;
+    }
+
     const result = await paymentService.confirmAndRelease(escrowId);
 
     const escrow = await EscrowHold.findById(escrowId).populate('sellerId');
@@ -225,12 +251,22 @@ ${product?.sensitiveData?.recoveryCode ? `<b>Tiklash kodi:</b> <code>${product.s
     await ctx.editMessageText(accessMessage, { parse_mode: 'HTML' });
     await ctx.answerCbQuery('✅ Tasdiqlandi!');
   } catch (error: any) {
+    if (error instanceof AlreadyProcessedError) {
+      await ctx.answerCbQuery('Bu buyurtma allaqachon qayta ishlangan.');
+      return;
+    }
     await ctx.answerCbQuery(`Xatolik: ${error.message}`);
   }
 });
 
 buyerHandler.action(/^refund_escrow_(.+)$/, async (ctx) => {
   const escrowId = ctx.match[1];
+  const owned = await loadOwnedEscrow(ctx.from!.id, escrowId);
+  if ('error' in owned) {
+    await ctx.answerCbQuery(owned.error);
+    return;
+  }
+
   await ctx.editMessageText(
     '<b>🔄 Qaytarish Sababi</b>\n\nNima sababdan akkauntni qaytarmoqchisiz?',
     {
@@ -253,6 +289,13 @@ buyerHandler.action(/^refund_reason_(.+?)_(.+)$/, async (ctx) => {
     };
 
     const reason = reasonMap[reasonType] || 'Boshqa sabab';
+
+    const owned = await loadOwnedEscrow(ctx.from!.id, escrowId);
+    if ('error' in owned) {
+      await ctx.answerCbQuery(owned.error);
+      return;
+    }
+
     await ctx.answerCbQuery(`Sabab: ${reason}`);
 
     const escrow = await EscrowHold.findById(escrowId)
@@ -314,6 +357,10 @@ ${result.message}
       );
     }
   } catch (error: any) {
+    if (error instanceof AlreadyProcessedError) {
+      await ctx.answerCbQuery('Bu buyurtma allaqachon qayta ishlangan.');
+      return;
+    }
     await ctx.answerCbQuery(`Xatolik: ${error.message}`);
   }
 });

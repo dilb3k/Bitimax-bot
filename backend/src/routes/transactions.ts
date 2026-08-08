@@ -1,7 +1,13 @@
 import { Router, Request, Response } from 'express';
 import { Transaction } from '../models/Transaction';
+import { requireInternalKey } from '../middleware/internalAuth';
+import { validateObjectId } from '../middleware/validateObjectId';
+import { config } from '../config';
 
 const router = Router();
+
+// Exposes buyer/seller PII (telegram ids, usernames) — internal callers only.
+router.use(requireInternalKey);
 
 router.get('/', async (req: Request, res: Response) => {
   try {
@@ -12,8 +18,8 @@ router.get('/', async (req: Request, res: Response) => {
     if (userId && role === 'buyer') filter.buyerId = userId;
     if (userId && role === 'seller') filter.sellerId = userId;
 
-    const pageNum = parseInt(page as string, 10);
-    const limitNum = parseInt(limit as string, 10);
+    const pageNum = Math.max(1, parseInt(page as string, 10) || 1);
+    const limitNum = Math.min(100, Math.max(1, parseInt(limit as string, 10) || 20));
 
     const [transactions, total] = await Promise.all([
       Transaction.find(filter)
@@ -36,11 +42,11 @@ router.get('/', async (req: Request, res: Response) => {
       },
     });
   } catch (error: any) {
-    res.status(500).json({ error: error.message });
+    res.status(500).json({ error: config.isProd ? 'Internal server error' : error.message });
   }
 });
 
-router.get('/:id', async (req: Request, res: Response) => {
+router.get('/:id', validateObjectId(), async (req: Request, res: Response) => {
   try {
     const transaction = await Transaction.findById(req.params.id)
       .populate('productId')
@@ -53,7 +59,7 @@ router.get('/:id', async (req: Request, res: Response) => {
 
     res.json({ transaction });
   } catch (error: any) {
-    res.status(500).json({ error: error.message });
+    res.status(500).json({ error: config.isProd ? 'Internal server error' : error.message });
   }
 });
 

@@ -42,4 +42,12 @@ const TransactionSchema = new Schema<ITransaction>(
   { timestamps: true }
 );
 
+// DB-level guarantee (defense in depth on top of the retry loop in paymentService) that two
+// transactions awaiting payment can never share a uniqueAmount, which would make an incoming
+// SMS ambiguous about which buyer actually paid.
+TransactionSchema.index(
+  { uniqueAmount: 1 },
+  { unique: true, partialFilterExpression: { status: 'pending_payment' } }
+);
+
 export const Transaction = mongoose.model<ITransaction>('Transaction', TransactionSchema);

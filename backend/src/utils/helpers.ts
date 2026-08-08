@@ -3,20 +3,22 @@ export function generateUniqueAmount(basePrice: number): number {
   return basePrice + randomCents;
 }
 
+// UZS bank SMS amounts are always whole so'm, commonly written with a thousands
+// separator (space, comma, apostrophe or dot), e.g. "1 250 000 so'm" or "1,250,000 UZS".
+// We capture the whole run of digits+separators before the currency marker and strip the
+// separators, rather than the old \d{1,6} pattern which silently failed (or truncated) on
+// any amount over 999,999 or written with a separator.
+const CURRENCY_MARKER = "(?:so['’]?m|sum|UZS|uzs|сум|сўм)";
+const AMOUNT_RUN = "\\d{1,3}(?:[\\s.,']\\d{3})*(?:[\\s.,']\\d{1,2})?|\\d+";
+
 export function extractAmountFromSms(text: string): number | null {
-  const patterns = [
-    /(\d{1,6}(?:[.,]\d{1,2})?)\s*(?:so['']?m|sum|so'm|UZS|uzs)/i,
-    /(\d{1,6}(?:[.,]\d{1,2})?)\s*(?:сум|сўм)/i,
-    /(\d{4,8})(?:\s*-\s*|\s)(?:so['']?m|sum|so'm)/i,
-  ];
-  for (const pattern of patterns) {
-    const match = text.match(pattern);
-    if (match) {
-      const amount = parseFloat(match[1].replace(',', '.'));
-      if (!isNaN(amount) && amount > 0) return amount;
-    }
-  }
-  return null;
+  const pattern = new RegExp(`(${AMOUNT_RUN})\\s*${CURRENCY_MARKER}`, 'i');
+  const match = text.match(pattern);
+  if (!match) return null;
+
+  const digitsOnly = match[1].replace(/[\s.,']/g, '');
+  const amount = parseInt(digitsOnly, 10);
+  return !isNaN(amount) && amount > 0 ? amount : null;
 }
 
 export function generateTemporaryPassword(): string {

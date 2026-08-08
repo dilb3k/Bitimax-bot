@@ -1,7 +1,10 @@
 import dayjs from 'dayjs';
 import { RefundPeriod, RefundResult } from '../types';
+import { config } from '../config';
 
-const PLATFORM_COMMISSION = 7;
+// Single source of truth for the commission rate — was previously hardcoded here
+// separately from config.platformCommission, so changing the env var silently had no effect.
+const PLATFORM_COMMISSION = config.platformCommission;
 
 export function calculateRefund(
   boughtAt: Date,

@@ -1,6 +1,11 @@
 node_modules/
 dist/
 .next/
-.env
+# Ignore every .env variant (.env, .env.local, .env.production, ...) except the
+# checked-in example templates that document required vars without real values.
+.env*
+!.env.example
 *.log
 .DS_Store
+*.tsbuildinfo
+.claude/

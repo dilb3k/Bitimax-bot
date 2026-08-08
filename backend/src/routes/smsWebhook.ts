@@ -1,19 +1,42 @@
 import { Router, Request, Response } from 'express';
+import rateLimit from 'express-rate-limit';
+import { z } from 'zod';
 import { paymentService } from '../services/paymentService';
 import { notificationService } from '../services/notificationService';
-import { config } from '../config';
+import { config, safeEquals } from '../config';
 
 const router = Router();
 
-router.post('/sms-webhook', async (req: Request, res: Response) => {
-  const { secret, text, sender, received_at } = req.body;
+// The webhook secret is effectively a password guarding real money movement — throttle
+// hard so it can't be brute-forced, independent of the global API rate limit.
+const webhookLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  limit: 20,
+  standardHeaders: true,
+  legacyHeaders: false,
+});
 
-  if (secret !== config.webhookSecret) {
+const smsWebhookSchema = z.object({
+  secret: z.string(),
+  text: z.string().min(1).max(2000),
+  sender: z.string().max(200).optional(),
+  received_at: z.union([z.string(), z.number()]).optional(),
+});
+
+router.post('/sms-webhook', webhookLimiter, async (req: Request, res: Response) => {
+  const parsed = smsWebhookSchema.safeParse(req.body);
+  if (!parsed.success) {
+    return res.status(400).json({ error: 'Invalid payload' });
+  }
+  const { secret, text, sender } = parsed.data;
+
+  if (!safeEquals(secret, config.webhookSecret)) {
     return res.status(403).json({ error: 'Invalid secret' });
   }
 
-  if (!text || typeof text !== 'string') {
-    return res.status(400).json({ error: 'Missing SMS text' });
+  if (config.smsAllowedSenders.length > 0 && (!sender || !config.smsAllowedSenders.includes(sender))) {
+    console.warn('[SMS Webhook] Rejected message from unrecognized sender:', sender);
+    return res.status(403).json({ error: 'Unrecognized sender' });
   }
 
   try {
