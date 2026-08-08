@@ -1,12 +1,17 @@
 import { config } from '../config';
+import { RefundQuote } from '../types';
+import { escapeHtml, formatUzs } from '../utils/helpers';
+import { adminRefundButtons } from '../bot/keyboards';
 
 type NotifyType = 'buyer' | 'seller' | 'admin';
 
 interface NotifyPayload {
   type: NotifyType;
-  chatId: number | string;
+  chatId: number | string | undefined | null;
   message: string;
   buttons?: any[];
+  /** Silences the delivery for low-priority updates. */
+  silent?: boolean;
 }
 
 class NotificationService {
@@ -18,25 +23,26 @@ class NotificationService {
 
   async send(payload: NotifyPayload): Promise<boolean> {
     if (!this.bot) {
-      console.warn('[Notify] Bot not initialized, message skipped:', payload.message.substring(0, 50));
+      console.warn('[Notify] Bot not initialized, message skipped:', payload.message.slice(0, 60));
       return false;
     }
+    if (!payload.chatId) return false;
 
     try {
-      const chatId = String(payload.chatId);
-      if (payload.buttons && payload.buttons.length > 0) {
-        await this.bot.telegram.sendMessage(chatId, payload.message, {
-          parse_mode: 'HTML',
-          reply_markup: { inline_keyboard: payload.buttons },
-        });
-      } else {
-        await this.bot.telegram.sendMessage(chatId, payload.message, {
-          parse_mode: 'HTML',
-        });
-      }
+      await this.bot.telegram.sendMessage(String(payload.chatId), payload.message, {
+        parse_mode: 'HTML',
+        disable_notification: payload.silent,
+        ...(payload.buttons?.length ? { reply_markup: { inline_keyboard: payload.buttons } } : {}),
+      });
       return true;
-    } catch (error) {
-      console.error(`[Notify] Failed to send to ${payload.chatId}:`, error);
+    } catch (error: any) {
+      // 403 means the user blocked the bot — expected, not an incident worth a stack trace.
+      const code = error?.response?.error_code;
+      if (code === 403) {
+        console.warn(`[Notify] ${payload.chatId} has blocked the bot`);
+      } else {
+        console.error(`[Notify] Failed to send to ${payload.chatId}:`, error?.message || error);
+      }
       return false;
     }
   }
@@ -45,52 +51,78 @@ class NotificationService {
     return this.send({
       type: 'admin',
       chatId: config.adminChatId,
-      message: `🤖 <b>Admin Xabari</b>\n\n${message}`,
+      message: `🤖 <b>Bitimax Admin</b>\n\n${message}`,
       buttons,
     });
   }
 
-  async notifyBuyer(chatId: number | string, message: string, buttons?: any[]) {
+  async notifyBuyer(chatId: number | string | undefined | null, message: string, buttons?: any[]) {
     return this.send({ type: 'buyer', chatId, message, buttons });
   }
 
-  async notifySeller(chatId: number | string, message: string, buttons?: any[]) {
+  async notifySeller(chatId: number | string | undefined | null, message: string, buttons?: any[]) {
     return this.send({ type: 'seller', chatId, message, buttons });
   }
 
-  async notifyRefundToAdmin(
-    buyerInfo: string,
-    sellerInfo: string,
+  /** Tells the buyer their transfer landed, with the button that opens the credentials. */
+  async notifyPaymentConfirmed(
+    chatId: number | string | undefined | null,
     productTitle: string,
     amount: number,
-    reason: string,
-    refundResult: any,
     escrowId: string
   ) {
-    const message = `
-🔄 <b>Qaytarish (Refund) So'rovi</b>
+    return this.send({
+      type: 'buyer',
+      chatId,
+      message: [
+        `✅ <b>To‘lov qabul qilindi!</b>`,
+        '',
+        `<b>Mahsulot:</b> ${escapeHtml(productTitle)}`,
+        `<b>Summa:</b> ${formatUzs(amount)}`,
+        '',
+        `Pul <b>escrow</b>da (kafilda) saqlanmoqda. Akkaunt ma’lumotlarini ochish uchun ` +
+          `pastdagi tugmani bosing.`,
+        '',
+        `<i>⏱ Qaytarish muddati ma’lumotlarni ochgan daqiqadan boshlanadi — shoshilmang, ` +
+          `tayyor bo‘lganingizda bosing.</i>`,
+      ].join('\n'),
+      buttons: [[{ text: '🔑 Ma’lumotlarni ochish', callback_data: `reveal_${escrowId}` }]],
+    });
+  }
 
-<b>Xaridor:</b> ${buyerInfo}
-<b>Sotuvchi:</b> ${sellerInfo}
-<b>Mahsulot:</b> ${productTitle}
-<b>Summa:</b> ${amount.toLocaleString()} UZS
-<b>Sabab:</b> ${reason}
-<b>Davr:</b> ${refundResult.period}
-<b>Jarima:</b> ${refundResult.penaltyPercent}%
-<b>Qaytariladigan:</b> ${refundResult.refundToBuyer?.toLocaleString() || 0} UZS
+  async notifyRefundToAdmin(input: {
+    buyer: string;
+    seller: string;
+    productTitle: string;
+    amount: number;
+    reason: string;
+    quote: RefundQuote;
+    escrowId: string;
+    sellerId: string;
+    productId: string;
+  }) {
+    const message = [
+      `🔄 <b>Qaytarish amalga oshirildi</b>`,
+      '',
+      `<b>Xaridor:</b> ${escapeHtml(input.buyer)}`,
+      `<b>Sotuvchi:</b> ${escapeHtml(input.seller)}`,
+      `<b>Mahsulot:</b> ${escapeHtml(input.productTitle)}`,
+      `<b>Summa:</b> ${formatUzs(input.amount)}`,
+      `<b>Sabab:</b> ${escapeHtml(input.reason)}`,
+      '',
+      `<b>Davr:</b> ${input.quote.label} (${input.quote.elapsedMinutes} daq.)`,
+      `<b>Jarima:</b> ${input.quote.penaltyPercent}%`,
+      `<b>Xaridorga:</b> ${formatUzs(input.quote.refundToBuyer)}`,
+      `<b>Sotuvchiga:</b> ${formatUzs(input.quote.sellerKeeps)}`,
+      `<b>Platformaga:</b> ${formatUzs(input.quote.platformKeeps)}`,
+      '',
+      `<i>Akkauntni tekshiring va kerakli chorani ko‘ring.</i>`,
+    ].join('\n');
 
-<i>Iltimos, akkauntni tekshiring va kerakli chora ko'ring.</i>
-    `.trim();
-
-    const buttons = [
-      [
-        { text: '✅ Akkauntni o\'chirish', callback_data: `admin_delete_product_${escrowId}` },
-        { text: '🚫 Bloklash', callback_data: `admin_ban_${escrowId}` },
-      ],
-      [{ text: '📋 Batafsil', callback_data: `admin_details_${escrowId}` }],
-    ];
-
-    return this.notifyAdmin(message, buttons);
+    return this.notifyAdmin(
+      message,
+      adminRefundButtons(input.escrowId, input.sellerId, input.productId).reply_markup.inline_keyboard
+    );
   }
 }
 

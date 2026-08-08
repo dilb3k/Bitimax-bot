@@ -18,6 +18,71 @@ function required(name: string, devFallback: string): string {
   return devFallback;
 }
 
+function num(name: string, fallback: number): number {
+  const raw = process.env[name];
+  if (!raw) return fallback;
+  const parsed = Number(raw);
+  return Number.isFinite(parsed) ? parsed : fallback;
+}
+
+/**
+ * Refund policy, expressed as an ordered table instead of an if/else chain, so the
+ * business rule lives in one auditable place and can be tuned per-market without
+ * touching the engine. `withinMinutes: null` is the terminal (no-refund) tier.
+ *
+ * `penaltyPercent` is the share of the order the buyer forfeits. The buyer always
+ * receives exactly `100 - penaltyPercent` percent — see refundEngine for how the
+ * forfeited pool is split between seller and platform.
+ */
+export interface RefundTier {
+  id: string;
+  label: string;
+  withinMinutes: number | null;
+  penaltyPercent: number;
+  allowed: boolean;
+}
+
+const DEFAULT_REFUND_TIERS: RefundTier[] = [
+  { id: '0-10min', label: '0–10 daqiqa', withinMinutes: 10, penaltyPercent: 0, allowed: true },
+  { id: '10min-2h', label: '10 daqiqa – 2 soat', withinMinutes: 120, penaltyPercent: 10, allowed: true },
+  { id: '2h-24h', label: '2 – 24 soat', withinMinutes: 1440, penaltyPercent: 50, allowed: true },
+  { id: 'over24h', label: '24 soatdan keyin', withinMinutes: null, penaltyPercent: 100, allowed: false },
+];
+
+function parseRefundTiers(): RefundTier[] {
+  const raw = process.env.REFUND_TIERS;
+  if (!raw) return DEFAULT_REFUND_TIERS;
+  try {
+    const parsed = JSON.parse(raw) as RefundTier[];
+    if (!Array.isArray(parsed) || parsed.length === 0) throw new Error('empty');
+    return parsed;
+  } catch (err) {
+    console.warn('[Config] REFUND_TIERS is not valid JSON — falling back to defaults.');
+    return DEFAULT_REFUND_TIERS;
+  }
+}
+
+/** Bank cards buyers can pay into. Rotating these is an ops action, not a code change. */
+export interface PaymentCard {
+  id: string;
+  number: string;
+  holder: string;
+  bank: string;
+  active: boolean;
+}
+
+function parsePaymentCards(): PaymentCard[] {
+  const raw = process.env.PAYMENT_CARDS;
+  if (!raw) return [];
+  try {
+    const parsed = JSON.parse(raw) as PaymentCard[];
+    return Array.isArray(parsed) ? parsed.filter((c) => c.active !== false) : [];
+  } catch {
+    console.warn('[Config] PAYMENT_CARDS is not valid JSON — no cards configured.');
+    return [];
+  }
+}
+
 export const config = {
   nodeEnv: process.env.NODE_ENV || 'development',
   isProd,
@@ -25,12 +90,48 @@ export const config = {
   port: parseInt(process.env.PORT || '3001', 10),
   botToken: process.env.BOT_TOKEN || '',
   adminChatId: process.env.ADMIN_CHAT_ID || '',
+  // Extra admins beyond the owner — comma separated telegram ids.
+  extraAdminIds: (process.env.ADMIN_IDS || '')
+    .split(',')
+    .map((s) => s.trim())
+    .filter(Boolean),
   webhookSecret: required('WEBHOOK_SECRET', 'dev_only_webhook_secret_change_me'),
   // Shared secret required on every internal (non-public) backend route, e.g. escrow/transactions
   // management. Only the bot process and trusted internal tools should ever hold this value.
   internalApiKey: required('INTERNAL_API_KEY', 'dev_only_internal_key_change_me'),
-  platformCommission: parseInt(process.env.PLATFORM_COMMISSION || '7', 10),
+  // 32-byte key (64 hex chars) used to envelope-encrypt account credentials at rest.
+  // Generate with: node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"
+  encryptionKey: required(
+    'ENCRYPTION_KEY',
+    '0'.repeat(64) // dev-only: predictable, never use outside local development
+  ),
+
+  platformCommission: num('PLATFORM_COMMISSION', 7),
+  refundTiers: parseRefundTiers(),
+  paymentCards: parsePaymentCards(),
+
+  // How long a buyer has to transfer the unique amount before the reservation lapses.
+  paymentWindowMinutes: num('PAYMENT_WINDOW_MINUTES', 10),
+  // After this long with no buyer action, escrow releases to the seller automatically.
+  // The TZ requires this ("24 soatdan keyin pul sotuvchiga o'tadi") — the scheduler enforces it.
+  autoReleaseHours: num('AUTO_RELEASE_HOURS', 24),
+  // If the buyer never even opens the credentials, releasing to the seller would pay for a
+  // delivery the buyer never took. After this long an unopened order is refunded in full and
+  // the listing goes back on sale instead.
+  unrevealedGraceHours: num('UNREVEALED_GRACE_HOURS', 72),
+  // Minimum withdrawal, and the flat fee the platform passes on for a bank transfer.
+  minPayoutAmount: num('MIN_PAYOUT_AMOUNT', 10000),
+  payoutFeeFlat: num('PAYOUT_FEE_FLAT', 0),
+  // A buyer who exceeds this many refunds in 30 days loses automatic refunds and is
+  // routed to manual arbitration instead — the main defence against refund farming.
+  refundAbuseThreshold: num('REFUND_ABUSE_THRESHOLD', 3),
+  // Credentials are wiped from the database this many days after an order settles.
+  credentialRetentionDays: num('CREDENTIAL_RETENTION_DAYS', 30),
+
   siteUrl: process.env.SITE_URL || 'https://bitimax.uz',
+  botUsername: process.env.BOT_USERNAME || 'bitimax_bot',
+  supportUsername: process.env.SUPPORT_USERNAME || 'bitimax_admin',
+
   // Comma-separated list of origins allowed to call the public API from a browser.
   corsOrigins: (process.env.CORS_ORIGINS || 'http://localhost:3000')
     .split(',')
@@ -42,7 +143,17 @@ export const config = {
     .split(',')
     .map((s) => s.trim())
     .filter(Boolean),
+
+  // Background jobs run in this process by default. Set to false on extra replicas so
+  // only one instance sweeps expiries / auto-releases.
+  jobsEnabled: process.env.JOBS_ENABLED !== 'false',
 };
+
+/** True for the platform owner and any additional configured admin telegram id. */
+export function isAdminTelegramId(telegramId: number | string): boolean {
+  const id = String(telegramId);
+  return id === config.adminChatId || config.extraAdminIds.includes(id);
+}
 
 // Constant-time comparison so guessing the webhook/internal secret can't be sped up via
 // response-time side channels.

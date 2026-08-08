@@ -133,7 +133,7 @@ export default function HomePage() {
         ) : products.length === 0 ? (
           <div className="text-center py-12">
             <p className="text-gray-500 text-lg">Mahsulot topilmadi</p>
-            <p className="text-gray-400 mt-2">Kategoriyani o\'zgartiring yoki boshqa so\'z bilan qidiring</p>
+            <p className="text-gray-400 mt-2">Kategoriyani o‘zgartiring yoki boshqa so‘z bilan qidiring</p>
           </div>
         ) : (
           <>
@@ -235,7 +235,7 @@ export default function HomePage() {
               <span>Komissiya: 7%</span>
               <span>•</span>
               <a href="https://t.me/bitimax_admin" target="_blank" rel="noopener noreferrer" className="text-primary-600 hover:underline">
-                Admin bilan bog\'lanish
+                Admin bilan bog‘lanish
               </a>
             </div>
           </div>

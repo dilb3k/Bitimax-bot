@@ -2,64 +2,112 @@ import { Markup } from 'telegraf';
 
 export const mainMenuKeyboard = Markup.keyboard([
   ['🛍 Mahsulotlar', '💰 Balans'],
-  ['📦 Mening buyurtmalarim', '📋 E\'lonlarim'],
+  ['📦 Mening buyurtmalarim', '📋 E’lonlarim'],
   ['⚙️ Sozlamalar', '❓ Yordam'],
 ]).resize();
 
 export const sellerMenuKeyboard = Markup.keyboard([
-  ['➕ Yangi e\'lon', '📋 Mening e\'lonlarim'],
+  ['➕ Yangi e’lon', '📋 Mening e’lonlarim'],
   ['💰 Balans', '📊 Statistika'],
   ['⚙️ Sozlamalar', '🏠 Asosiy menu'],
 ]).resize();
 
 export const adminMenuKeyboard = Markup.keyboard([
   ['👥 Foydalanuvchilar', '📊 Statistika'],
+  ['🛡 Moderatsiya', '💸 To‘lov so‘rovlari'],
+  ['📥 To‘lov inbox', '⚖️ Nizolar'],
   ['⚙️ Sozlamalar', '🏠 Asosiy menu'],
 ]).resize();
 
+export const balanceKeyboard = Markup.inlineKeyboard([
+  [Markup.button.callback('💸 Pul yechish', 'payout_request')],
+  [Markup.button.callback('💳 Kartani saqlash', 'payout_card')],
+  [Markup.button.callback('📜 Tranzaksiyalar', 'balance_statement')],
+]);
+
 export function confirmSellerWarning() {
   return Markup.inlineKeyboard([
-    Markup.button.callback('✅ Tushunib yetdim, davom etish', 'seller_accept_warning'),
-    Markup.button.callback('❌ Bekor qilish', 'seller_cancel'),
+    [Markup.button.callback('✅ Tushundim, davom etish', 'seller_accept_warning')],
+    [Markup.button.callback('❌ Bekor qilish', 'seller_cancel')],
   ]);
 }
 
 export function productActionButtons(productId: string) {
   return Markup.inlineKeyboard([
-    Markup.button.callback('📥 Sotib olish', `buy_${productId}`),
-    Markup.button.callback('🔍 Batafsil', `detail_${productId}`),
+    [
+      Markup.button.callback('📥 Sotib olish', `buy_${productId}`),
+      Markup.button.callback('🔍 Batafsil', `detail_${productId}`),
+    ],
   ]);
 }
 
-export function paymentConfirmationButtons(productId: string) {
+/** Shown after payment confirms — the buyer opens the credentials themselves. */
+export function revealButton(escrowId: string) {
   return Markup.inlineKeyboard([
-    Markup.button.callback("💳 To'lovni tasdiqlash", `confirm_payment_${productId}`),
-    Markup.button.callback('❌ Bekor qilish', `cancel_payment_${productId}`),
+    [Markup.button.callback('🔑 Ma’lumotlarni ochish', `reveal_${escrowId}`)],
   ]);
 }
 
 export function escrowActionButtons(escrowId: string) {
   return Markup.inlineKeyboard([
-    Markup.button.callback('✅ Tasdiqlayman', `confirm_escrow_${escrowId}`),
-    Markup.button.callback('🔄 Qaytarish', `refund_escrow_${escrowId}`),
-    Markup.button.callback('❓ Yordam', `help_escrow_${escrowId}`),
+    [
+      Markup.button.callback('✅ Tasdiqlayman', `confirm_escrow_${escrowId}`),
+      Markup.button.callback('🔄 Qaytarish', `refund_escrow_${escrowId}`),
+    ],
+    [
+      Markup.button.callback('🔑 Qayta ko‘rish', `reveal_${escrowId}`),
+      Markup.button.callback('❓ Yordam', `help_escrow_${escrowId}`),
+    ],
   ]);
 }
 
+/**
+ * Callback data is capped at 64 bytes and a 24-char ObjectId eats most of it, so the reason
+ * prefixes are kept short (`rr_` = refund reason, `rdo_` = refund do it).
+ */
 export function refundReasonButtons(escrowId: string) {
   return Markup.inlineKeyboard([
-    Markup.button.callback('🔑 Akkaunt ishlamayapti', `refund_reason_not_working_${escrowId}`),
-    Markup.button.callback('📝 Noto\'g\'ri ma\'lumot', `refund_reason_wrong_info_${escrowId}`),
-    Markup.button.callback('🕐 Boshqa sabab', `refund_reason_other_${escrowId}`),
-    Markup.button.callback('❌ Bekor qilish', `refund_cancel_${escrowId}`),
+    [Markup.button.callback('🔑 Akkaunt ishlamayapti', `rr_not_working_${escrowId}`)],
+    [Markup.button.callback('📝 Ma’lumot noto‘g‘ri', `rr_wrong_info_${escrowId}`)],
+    [Markup.button.callback('↩️ Asl egasi qaytarib oldi', `rr_recovered_${escrowId}`)],
+    [Markup.button.callback('💬 Boshqa sabab', `rr_other_${escrowId}`)],
+    [Markup.button.callback('❌ Bekor qilish', `refund_cancel_${escrowId}`)],
   ]);
 }
 
-export function adminProductActionButtons(productId: string) {
+export function refundConfirmButtons(escrowId: string, reasonType: string) {
   return Markup.inlineKeyboard([
-    Markup.button.callback('🗑 Akkauntni o\'chirish', `admin_delete_product_${productId}`),
-    Markup.button.callback('🚫 Sotuvchini bloklash', `admin_ban_seller_${productId}`),
-    Markup.button.callback('📋 Tafsilotlar', `admin_details_${productId}`),
+    [Markup.button.callback('✅ Ha, qaytaring', `rdo_${reasonType}_${escrowId}`)],
+    [Markup.button.callback('❌ Bekor qilish', `refund_cancel_${escrowId}`)],
+  ]);
+}
+
+/** Admin controls attached to a refund alert. */
+export function adminRefundButtons(escrowId: string, sellerId: string, productId: string) {
+  return Markup.inlineKeyboard([
+    [Markup.button.callback('🗑 E’lonni o‘chirish', `adm_delprod_${productId}`)],
+    [Markup.button.callback('🚫 Sotuvchini bloklash', `adm_ban_${sellerId}`)],
+    [Markup.button.callback('📋 Batafsil', `adm_details_${escrowId}`)],
+  ]);
+}
+
+/** Moderation queue controls. */
+export function moderationButtons(productId: string) {
+  return Markup.inlineKeyboard([
+    [
+      Markup.button.callback('✅ Tasdiqlash', `mod_approve_${productId}`),
+      Markup.button.callback('❌ Rad etish', `mod_reject_${productId}`),
+    ],
+  ]);
+}
+
+export function payoutButtons(payoutId: string) {
+  return Markup.inlineKeyboard([
+    [Markup.button.callback('💳 Karta raqamini ko‘rish', `po_reveal_${payoutId}`)],
+    [
+      Markup.button.callback('✅ To‘landi', `po_paid_${payoutId}`),
+      Markup.button.callback('❌ Rad etish', `po_reject_${payoutId}`),
+    ],
   ]);
 }
 
@@ -69,8 +117,9 @@ export function backButton() {
 
 export function profileSettingsKeyboard() {
   return Markup.inlineKeyboard([
-    Markup.button.callback('📢 Bildirishnomalar', 'settings_notifications'),
-    Markup.button.callback('👤 Rolni o\'zgartirish', 'settings_role'),
-    Markup.button.callback('⬅ Orqaga', 'back_main'),
+    [Markup.button.callback('📢 Bildirishnomalar', 'settings_notifications')],
+    [Markup.button.callback('🌐 Til / Язык', 'settings_language')],
+    [Markup.button.callback('🧑‍💼 Sotuvchi bo‘lish', 'settings_become_seller')],
+    [Markup.button.callback('⬅ Orqaga', 'back_main')],
   ]);
 }

@@ -4,32 +4,42 @@ import { Product } from '../../models/Product';
 import { EscrowHold } from '../../models/EscrowHold';
 import { botApi } from '../services/api';
 import { notificationService } from '../../services/notificationService';
-import { paymentService, AlreadyProcessedError } from '../../services/paymentService';
+import {
+  paymentService,
+  AlreadyProcessedError,
+  ProductUnavailableError,
+  ForbiddenError,
+} from '../../services/paymentService';
+import { describeRefundPolicy } from '../../services/refundEngine';
+import { config } from '../../config';
+import { escapeHtml, formatUzs } from '../../utils/helpers';
 import {
   mainMenuKeyboard,
   productActionButtons,
-  paymentConfirmationButtons,
+  revealButton,
   escrowActionButtons,
   refundReasonButtons,
+  refundConfirmButtons,
 } from '../keyboards';
 
 export const buyerHandler = new Composer();
 
 /**
- * Telegram callback_data is attacker-controllable (a crafted client can send arbitrary
- * callback_query data, not just what was on the button it was shown). Every handler that
- * acts on an escrowId taken from callback_data MUST verify the clicking user actually owns
- * it before touching money or releasing product credentials.
+ * Telegram callback_data is attacker-controllable — a crafted client can send arbitrary
+ * callback_query data, not just what was on the button it was shown. Every handler that acts
+ * on an escrowId from callback_data MUST verify the clicking user owns it before touching
+ * money or releasing credentials.
  */
 async function loadOwnedEscrow(telegramId: number, escrowId: string) {
   const user = await User.findOne({ telegramId });
   if (!user) return { error: 'Foydalanuvchi topilmadi' as const };
+  if (user.isBlocked) return { error: 'Hisobingiz bloklangan' as const };
 
-  const escrow = await EscrowHold.findById(escrowId);
+  const escrow = await EscrowHold.findById(escrowId).catch(() => null);
   if (!escrow) return { error: 'Buyurtma topilmadi' as const };
 
   if (escrow.buyerId.toString() !== user._id.toString()) {
-    return { error: 'Ruxsat yo\'q' as const };
+    return { error: 'Ruxsat yo‘q' as const };
   }
 
   return { escrow, user };
@@ -39,86 +49,93 @@ buyerHandler.hears('🛍 Mahsulotlar', async (ctx) => {
   const { products, total, pages } = await botApi.getActiveProducts(1, 10);
 
   if (products.length === 0) {
-    await ctx.reply('Hozircha faol mahsulotlar mavjud emas. Keyinroq urinib ko\'ring.');
+    await ctx.reply('Hozircha faol mahsulotlar mavjud emas. Keyinroq urinib ko‘ring.');
     return;
   }
 
   await ctx.replyWithHTML(
-    `<b>🛍 Mahsulotlar (1-${products.length}/${total})</b>`
+    `<b>🛍 Mahsulotlar (1–${products.length} / ${total})</b>\n\n` +
+      `<i>To‘liq katalog va filtrlar: ${config.siteUrl}</i>`
   );
 
   for (const product of products) {
-    const msg = `
-<b>${product.title}</b>
-${product.description.substring(0, 100)}${product.description.length > 100 ? '...' : ''}
+    const seller = product.sellerId as any;
+    const rating = seller?.sellerStats?.ratingCount
+      ? `⭐ ${(seller.sellerStats.ratingSum / seller.sellerStats.ratingCount).toFixed(1)} (${seller.sellerStats.ratingCount})`
+      : '⭐ yangi sotuvchi';
 
-💰 <b>Narx:</b> ${product.price.toLocaleString()} UZS
-📂 <b>Kategoriya:</b> ${product.category}
-🏷 <b>ID:</b> ${product._id}
-    `.trim();
+    const msg = [
+      `<b>${escapeHtml(product.title)}</b>`,
+      escapeHtml(product.description.slice(0, 140)) + (product.description.length > 140 ? '…' : ''),
+      '',
+      `💰 <b>${formatUzs(product.price)}</b>`,
+      `📂 ${escapeHtml(product.category)}`,
+      `👤 ${rating}`,
+    ].join('\n');
 
     await ctx.replyWithHTML(msg, productActionButtons(product._id.toString()));
   }
 
   if (pages > 1) {
-    await ctx.replyWithHTML(
-      `<b>📄 Sahifalar:</b> 1/${pages}\n\nKeyingi sahifani ko'rish uchun /next ni bosing.`
-    );
+    await ctx.replyWithHTML(`<b>📄 Sahifa 1 / ${pages}</b> — keyingisi uchun /next`);
   }
 });
 
 buyerHandler.action(/^buy_(.+)$/, async (ctx) => {
   try {
     const productId = ctx.match[1];
-    const telegramId = ctx.from!.id;
-    const user = await User.findOne({ telegramId });
+    const user = await User.findOne({ telegramId: ctx.from!.id });
 
     if (!user) {
-      await ctx.answerCbQuery('Foydalanuvchi topilmadi');
+      await ctx.answerCbQuery('Foydalanuvchi topilmadi — /start bosing');
+      return;
+    }
+    if (user.isBlocked) {
+      await ctx.answerCbQuery('Hisobingiz bloklangan');
       return;
     }
 
-    const product = await Product.findById(productId);
-    if (!product || product.status !== 'active') {
-      await ctx.answerCbQuery('❌ Mahsulot mavjud emas yoki allaqachon sotilgan');
-      return;
-    }
-
-    if (product.sellerId.toString() === user._id.toString()) {
-      await ctx.answerCbQuery('❌ O\'z mahsulotingizni sotib ololmaysiz');
-      return;
-    }
-
-    const { transaction, uniqueAmount } = await botApi.initiatePurchase(
+    const { product, uniqueAmount, card, expiresAt } = await botApi.initiatePurchase(
       productId,
       user._id.toString()
     );
 
-    const paymentMessage = `
-<b>💳 To'lov Ma'lumotlari</b>
+    const cardBlock = card
+      ? `<b>💳 Karta:</b> <code>${card.raw}</code>\n<b>👤 Egasi:</b> ${escapeHtml(card.holder)}\n<b>🏦 Bank:</b> ${escapeHtml(card.bank)}`
+      : `<i>⚠️ To‘lov kartasi sozlanmagan — admin bilan bog‘laning.</i>`;
 
-<b>Mahsulot:</b> ${product.title}
-<b>Narx:</b> ${product.price.toLocaleString()} UZS
+    const paymentMessage = [
+      `<b>💳 To‘lov ma’lumotlari</b>`,
+      '',
+      `<b>Mahsulot:</b> ${escapeHtml(product.title)}`,
+      `<b>Narx:</b> ${formatUzs(product.price)}`,
+      '',
+      `<b>📌 AYNAN shu summani o‘tkazing:</b>`,
+      `<code>${uniqueAmount}</code> UZS`,
+      '',
+      cardBlock,
+      '',
+      `⏱ <b>Muddat:</b> ${config.paymentWindowMinutes} daqiqa (${expiresAt.toLocaleTimeString('uz-UZ')} gacha)`,
+      '',
+      `<i>⚠️ Summadagi oxirgi raqamlar aynan sizning buyurtmangizni aniqlaydi. ` +
+        `Boshqa summa o‘tkazsangiz, to‘lov avtomatik tanilmaydi.</i>`,
+      '',
+      `<i>To‘lov tushgach, bot sizga avtomatik xabar yuboradi.</i>`,
+    ].join('\n');
 
-<b>📌 To'lov uchun summa:</b>
-<code>${uniqueAmount.toLocaleString()} UZS</code>
-
-<b>🏦 Bank:</b> Istalgan O'zbekiston banki orqali
-<b>💳 Karta:</b> <code>8600 XXXX XXXX XXXX</code>
-
-<i>⚠️ Diqqat! Aynan yuqoridagi summani to'lang. SMS-xabar avtomatik tizim tomonidan aniqlanadi.</i>
-
-<i>⏱ To'lov uchun 10 daqiqa vaqtingiz bor.</i>
-    `.trim();
-
-    await ctx.editMessageText(paymentMessage, {
-      parse_mode: 'HTML',
-      reply_markup: paymentConfirmationButtons(productId).reply_markup,
-    });
-
-    await ctx.answerCbQuery();
+    await ctx.editMessageText(paymentMessage, { parse_mode: 'HTML' });
+    await ctx.answerCbQuery('To‘lov yaratildi');
   } catch (error: any) {
-    await ctx.answerCbQuery(`Xatolik: ${error.message}`);
+    if (error instanceof ProductUnavailableError) {
+      await ctx.answerCbQuery('❌ Mahsulot sotilgan yoki band qilingan');
+      return;
+    }
+    if (error instanceof ForbiddenError) {
+      await ctx.answerCbQuery(`❌ ${error.message}`);
+      return;
+    }
+    console.error('[Buyer] buy failed:', error);
+    await ctx.answerCbQuery('Xatolik yuz berdi, qayta urinib ko‘ring');
   }
 });
 
@@ -127,7 +144,7 @@ buyerHandler.action(/^detail_(.+)$/, async (ctx) => {
     const productId = ctx.match[1];
     const product = await Product.findById(productId).populate(
       'sellerId',
-      'telegramId username'
+      'telegramId username trustLevel sellerStats'
     );
 
     if (!product) {
@@ -135,44 +152,117 @@ buyerHandler.action(/^detail_(.+)$/, async (ctx) => {
       return;
     }
 
-    const detailText = `
-<b>📋 Mahsulot Tafsilotlari</b>
-
-<b>Nomi:</b> ${product.title}
-<b>Tavsif:</b> ${product.description}
-<b>Narx:</b> ${product.price.toLocaleString()} UZS
-<b>Kategoriya:</b> ${product.category}
-<b>Sotuvchi:</b> ${(product.sellerId as any)?.username || 'Noma\'lum'}
-<b>Holat:</b> 🟢 Mavjud
-
-<i>Akkaunt login/parol ma'lumotlari to'lovdan so'ng taqdim etiladi.</i>
-    `.trim();
+    const seller = product.sellerId as any;
+    const detailText = [
+      `<b>📋 ${escapeHtml(product.title)}</b>`,
+      '',
+      escapeHtml(product.description),
+      '',
+      `<b>Narx:</b> ${formatUzs(product.price)}`,
+      `<b>Kategoriya:</b> ${escapeHtml(product.category)}`,
+      `<b>Sotuvchi:</b> ${escapeHtml(seller?.username || 'noma’lum')} (${seller?.trustLevel || 'new'})`,
+      `<b>Sotgan:</b> ${seller?.sellerStats?.sold ?? 0} ta`,
+      '',
+      `🛡 <b>Escrow himoyasi:</b>`,
+      describeRefundPolicy(),
+      '',
+      `<i>Login/parol to‘lov tasdiqlangandan keyin ochiladi.</i>`,
+    ].join('\n');
 
     await ctx.editMessageText(detailText, {
       parse_mode: 'HTML',
       reply_markup: productActionButtons(productId).reply_markup,
     });
-
     await ctx.answerCbQuery();
   } catch (error) {
     await ctx.answerCbQuery('Xatolik yuz berdi');
   }
 });
 
-buyerHandler.action(/^confirm_payment_(.+)$/, async (ctx) => {
-  await ctx.answerCbQuery();
-  await ctx.replyWithHTML(
-    '<b>💡 To\'lovni amalga oshirish</b>\n\n' +
-    '1. Yuqoridagi summani bank kartangiz orqali to\'lang\n' +
-    '2. SMS-xabar kelgach, tizim avtomatik to\'lovni tasdiqlaydi\n' +
-    '3. To\'lov tasdiqlangach, akkaunt ma\'lumotlari avtomatik yuboriladi\n\n' +
-    '<i>Agar 10 daqiqa ichida SMS kelmasa, yangi to\'lov yarating.</i>'
-  );
-});
+/**
+ * Reveals the credentials and starts the refund clock.
+ *
+ * In v1 the only way to see the login was to press "Tasdiqlayman" — which simultaneously
+ * released the money to the seller. A buyer could not inspect what they bought before paying
+ * out for it, which made the escrow guarantee meaningless. Reveal and confirm are now separate
+ * steps: look first, decide second.
+ */
+buyerHandler.action(/^reveal_(.+)$/, async (ctx) => {
+  try {
+    const escrowId = ctx.match[1];
+    const owned = await loadOwnedEscrow(ctx.from!.id, escrowId);
+    if ('error' in owned) {
+      await ctx.answerCbQuery(owned.error);
+      return;
+    }
 
-buyerHandler.action(/^cancel_payment_(.+)$/, async (ctx) => {
-  await ctx.answerCbQuery('To\'lov bekor qilindi');
-  await ctx.reply('To\'lov jarayoni bekor qilindi. Boshqa mahsulotni tanlashingiz mumkin.');
+    const { credentials, hold, firstReveal } = await paymentService.revealCredentials(
+      escrowId,
+      owned.user._id.toString()
+    );
+    const product = await Product.findById(hold.productId);
+
+    const lines = [
+      `🔑 <b>Akkaunt ma’lumotlari</b>`,
+      '',
+      `<b>${escapeHtml(product?.title || 'Mahsulot')}</b>`,
+      '',
+      `<b>Login:</b> <code>${escapeHtml(credentials.login)}</code>`,
+      `<b>Parol:</b> <code>${escapeHtml(credentials.password)}</code>`,
+    ];
+    if (credentials.recoveryCode) {
+      lines.push(`<b>Tiklash kodi:</b> <code>${escapeHtml(credentials.recoveryCode)}</code>`);
+    }
+    if (credentials.additionalInfo) {
+      lines.push(`<b>Qo‘shimcha:</b> ${escapeHtml(credentials.additionalInfo)}`);
+    }
+
+    lines.push(
+      '',
+      `⚠️ <b>MUHIM — tartib bilan bajaring:</b>`,
+      `1️⃣ Avval akkauntga <b>kiring va tekshiring</b> (hech narsani o‘zgartirmang)`,
+      `2️⃣ Hammasi joyida bo‘lsa — <b>“Tasdiqlayman”</b> tugmasini bosing`,
+      `3️⃣ Faqat shundan keyin parol/emailni o‘zingizga o‘zgartiring`,
+      '',
+      `<i>Agar tasdiqlashdan oldin ma’lumotlarni o‘zgartirsangiz va keyin qaytarish so‘rasangiz, ` +
+        `sotuvchi dalil taqdim etib nizoni yutib olishi mumkin.</i>`,
+      '',
+      `⏱ Qaytarish muddati shu daqiqadan boshlandi:`,
+      describeRefundPolicy(),
+      '',
+      `<i>${config.autoReleaseHours} soat ichida javob bermasangiz, pul avtomatik sotuvchiga o‘tadi.</i>`
+    );
+
+    await ctx.editMessageText(lines.join('\n'), {
+      parse_mode: 'HTML',
+      reply_markup: escrowActionButtons(escrowId).reply_markup,
+    });
+    await ctx.answerCbQuery(firstReveal ? '🔑 Ochildi — vaqt boshlandi' : '🔑 Qayta ko‘rsatildi');
+
+    if (firstReveal) {
+      const seller = await User.findById(hold.sellerId);
+      if (seller?.telegramId) {
+        await notificationService.notifySeller(
+          seller.telegramId,
+          `👀 <b>Xaridor ma’lumotlarni ochdi</b>\n\n` +
+            `Mahsulot: ${escapeHtml(product?.title || '—')}\n` +
+            `${config.autoReleaseHours} soat ichida e’tiroz bo‘lmasa, ` +
+            `<b>${formatUzs(hold.sellerPayout)}</b> balansingizga o‘tadi.`
+        );
+      }
+    }
+  } catch (error: any) {
+    if (error instanceof AlreadyProcessedError) {
+      await ctx.answerCbQuery(error.message);
+      return;
+    }
+    if (error instanceof ForbiddenError) {
+      await ctx.answerCbQuery('Ruxsat yo‘q');
+      return;
+    }
+    console.error('[Buyer] reveal failed:', error);
+    await ctx.answerCbQuery('Xatolik yuz berdi');
+  }
 });
 
 buyerHandler.hears('📦 Mening buyurtmalarim', async (ctx) => {
@@ -187,21 +277,30 @@ buyerHandler.hears('📦 Mening buyurtmalarim', async (ctx) => {
   }
 
   for (const escrow of escrows) {
-    const product = await Product.findById(escrow.productId);
-    const statusEmoji =
-      escrow.status === 'holding' ? '🟡' :
-      escrow.status === 'released' ? '✅' : '🔄';
+    const product = escrow.productId as any;
+    const statusLabel: Record<string, string> = {
+      holding: '🟡 Escrow’da',
+      released: '✅ Yakunlangan',
+      refunded: '🔄 Qaytarilgan',
+      partial_refunded: '🔄 Qisman qaytarilgan',
+      disputed: '⚖️ Nizoda',
+    };
 
-    const msg = `
-${statusEmoji} <b>${product?.title || 'Noma\'lum mahsulot'}</b>
-
-💰 <b>Summa:</b> ${escrow.amount.toLocaleString()} UZS
-📊 <b>Holat:</b> ${escrow.status}
-🕐 <b>Sotib olingan:</b> ${new Date(escrow.boughtAt).toLocaleString('uz-UZ')}
-    `.trim();
+    const msg = [
+      `${statusLabel[escrow.status] || escrow.status} <b>${escapeHtml(product?.title || 'Mahsulot')}</b>`,
+      '',
+      `💰 ${formatUzs(escrow.amount)}`,
+      `🕐 ${new Date(escrow.boughtAt).toLocaleString('uz-UZ')}`,
+      escrow.credentialsRevealedAt
+        ? `🔑 Ochilgan: ${new Date(escrow.credentialsRevealedAt).toLocaleString('uz-UZ')}`
+        : `🔒 Ma’lumotlar hali ochilmagan`,
+    ].join('\n');
 
     if (escrow.status === 'holding') {
-      await ctx.replyWithHTML(msg, escrowActionButtons(escrow._id.toString()));
+      const keyboard = escrow.credentialsRevealedAt
+        ? escrowActionButtons(escrow._id.toString())
+        : revealButton(escrow._id.toString());
+      await ctx.replyWithHTML(msg, keyboard);
     } else {
       await ctx.replyWithHTML(msg);
     }
@@ -217,45 +316,80 @@ buyerHandler.action(/^confirm_escrow_(.+)$/, async (ctx) => {
       return;
     }
 
-    const result = await paymentService.confirmAndRelease(escrowId);
+    const result = await paymentService.confirmAndRelease(escrowId, owned.user._id.toString());
 
     const escrow = await EscrowHold.findById(escrowId).populate('sellerId');
-    if (escrow && (escrow.sellerId as any)?.telegramId) {
-      const sellerTelegramId = (escrow.sellerId as any).telegramId;
-      const product = await Product.findById(escrow.productId);
+    const product = await Product.findById(escrow?.productId);
+    const seller = escrow?.sellerId as any;
 
+    if (seller?.telegramId) {
       await notificationService.notifySeller(
-        sellerTelegramId,
-        `✅ <b>Mahsulot tasdiqlandi!</b>\n\n` +
-        `Mahsulot: ${product?.title || 'Noma\'lum'}\n` +
-        `Summa: ${result.sellerPayout.toLocaleString()} UZS\n` +
-        `Komissiya (7%): ${(escrow.amount - result.sellerPayout).toLocaleString()} UZS\n\n` +
-        `Pul balansingizga o'tkazildi.`
+        seller.telegramId,
+        `✅ <b>Xaridor bitimni tasdiqladi!</b>\n\n` +
+          `Mahsulot: ${escapeHtml(product?.title || '—')}\n` +
+          `Balansingizga: <b>${formatUzs(result.sellerPayout)}</b>\n` +
+          `Komissiya (${config.platformCommission}%): ${formatUzs(result.commission)}`
       );
     }
 
-    const product = await Product.findById(escrow?.productId);
-    const accessMessage = `
-✅ <b>To'lov tasdiqlandi! Mahsulot sizga taqdim etildi.</b>
-
-<b>${product?.title || 'Mahsulot'}</b>
-
-<b>🔑 Akkaunt ma'lumotlari:</b>
-<b>Login:</b> <code>${product?.sensitiveData?.login || 'N/A'}</code>
-<b>Parol:</b> <code>${product?.sensitiveData?.password || 'N/A'}</code>
-${product?.sensitiveData?.recoveryCode ? `<b>Tiklash kodi:</b> <code>${product.sensitiveData.recoveryCode}</code>` : ''}
-
-⚠️ <b>MUHIM:</b> Akkaunt ma'lumotlarini <b>DARHOL</b> o'zingizga to'liq o'zgartiring (email, parol, tiklash ma'lumotlari)!
-    `.trim();
-
-    await ctx.editMessageText(accessMessage, { parse_mode: 'HTML' });
+    await ctx.editMessageText(
+      [
+        `✅ <b>Bitim yakunlandi!</b>`,
+        '',
+        `${escapeHtml(product?.title || 'Mahsulot')} bo‘yicha pul sotuvchiga o‘tkazildi.`,
+        '',
+        `⚠️ Endi akkaunt parolini, emailini va tiklash ma’lumotlarini <b>darhol</b> o‘zingizga o‘zgartiring!`,
+        '',
+        `<i>Sotuvchini baholang — bu boshqa xaridorlarga yordam beradi.</i>`,
+      ].join('\n'),
+      {
+        parse_mode: 'HTML',
+        reply_markup: {
+          inline_keyboard: [
+            [1, 2, 3, 4, 5].map((n) => ({
+              text: '⭐'.repeat(n),
+              callback_data: `rate_${escrowId}_${n}`,
+            })),
+          ],
+        },
+      }
+    );
     await ctx.answerCbQuery('✅ Tasdiqlandi!');
   } catch (error: any) {
     if (error instanceof AlreadyProcessedError) {
-      await ctx.answerCbQuery('Bu buyurtma allaqachon qayta ishlangan.');
+      await ctx.answerCbQuery('Bu buyurtma allaqachon yopilgan');
       return;
     }
-    await ctx.answerCbQuery(`Xatolik: ${error.message}`);
+    console.error('[Buyer] confirm failed:', error);
+    await ctx.answerCbQuery('Xatolik yuz berdi');
+  }
+});
+
+buyerHandler.action(/^rate_(.+)_([1-5])$/, async (ctx) => {
+  try {
+    const escrowId = ctx.match[1];
+    const rating = parseInt(ctx.match[2], 10);
+
+    const owned = await loadOwnedEscrow(ctx.from!.id, escrowId);
+    if ('error' in owned) {
+      await ctx.answerCbQuery(owned.error);
+      return;
+    }
+    if (owned.escrow.buyerRating) {
+      await ctx.answerCbQuery('Siz allaqachon baho bergansiz');
+      return;
+    }
+
+    owned.escrow.buyerRating = rating;
+    await owned.escrow.save();
+    await User.findByIdAndUpdate(owned.escrow.sellerId, {
+      $inc: { 'sellerStats.ratingSum': rating, 'sellerStats.ratingCount': 1 },
+    });
+
+    await ctx.editMessageReplyMarkup(undefined);
+    await ctx.answerCbQuery(`Rahmat! Bahoyingiz: ${'⭐'.repeat(rating)}`);
+  } catch (error) {
+    await ctx.answerCbQuery('Xatolik yuz berdi');
   }
 });
 
@@ -267,27 +401,66 @@ buyerHandler.action(/^refund_escrow_(.+)$/, async (ctx) => {
     return;
   }
 
+  // Show the buyer exactly what they will receive before they commit to anything.
+  const quote = await paymentService.quoteRefundFor(escrowId);
+
+  if (!quote.allowed) {
+    await ctx.editMessageText(
+      `❌ <b>Avtomatik qaytarish mumkin emas</b>\n\n${quote.message}\n\n` +
+        `Nizo ochish uchun: ${botApi.supportLink()}`,
+      { parse_mode: 'HTML' }
+    );
+    await ctx.answerCbQuery();
+    return;
+  }
+
   await ctx.editMessageText(
-    '<b>🔄 Qaytarish Sababi</b>\n\nNima sababdan akkauntni qaytarmoqchisiz?',
-    {
-      parse_mode: 'HTML',
-      reply_markup: refundReasonButtons(escrowId).reply_markup,
-    }
+    [
+      `<b>🔄 Qaytarish hisob-kitobi</b>`,
+      '',
+      `<b>Davr:</b> ${quote.label} (${quote.elapsedMinutes} daqiqa o‘tdi)`,
+      `<b>Jarima:</b> ${quote.penaltyPercent}% — ${formatUzs(quote.penaltyAmount)}`,
+      `<b>Sizga qaytariladi:</b> <b>${formatUzs(quote.refundToBuyer)}</b>`,
+      '',
+      quote.requiresArbitration
+        ? `⚠️ <i>Sizda so‘nggi 30 kunda ko‘p qaytarish bo‘lgan. So‘rov admin ko‘rigiga yuboriladi.</i>`
+        : `<i>Sababni tanlang:</i>`,
+    ].join('\n'),
+    { parse_mode: 'HTML', reply_markup: refundReasonButtons(escrowId).reply_markup }
   );
   await ctx.answerCbQuery();
 });
 
-buyerHandler.action(/^refund_reason_(.+?)_(.+)$/, async (ctx) => {
+buyerHandler.action(/^rr_(not_working|wrong_info|recovered|other)_(.+)$/, async (ctx) => {
+  const reasonType = ctx.match[1];
+  const escrowId = ctx.match[2];
+
+  const reasonMap: Record<string, string> = {
+    not_working: 'Akkaunt ishlamayapti (login/parol noto‘g‘ri)',
+    wrong_info: 'E’londagi ma’lumot haqiqatga mos emas',
+    recovered: 'Asl egasi akkauntni qaytarib oldi',
+    other: 'Boshqa sabab',
+  };
+
+  await ctx.editMessageText(
+    `<b>🔄 Tasdiqlash</b>\n\nSabab: <b>${reasonMap[reasonType]}</b>\n\n` +
+      `<i>Qaytarishni yakuniy tasdiqlaysizmi? Bu amalni bekor qilib bo‘lmaydi.</i>`,
+    { parse_mode: 'HTML', reply_markup: refundConfirmButtons(escrowId, reasonType).reply_markup }
+  );
+  await ctx.answerCbQuery();
+});
+
+buyerHandler.action(/^rdo_(not_working|wrong_info|recovered|other)_(.+)$/, async (ctx) => {
   try {
     const reasonType = ctx.match[1];
     const escrowId = ctx.match[2];
 
     const reasonMap: Record<string, string> = {
-      not_working: 'Akkaunt ishlamayapti',
-      wrong_info: 'Noto\'g\'ri ma\'lumot berilgan',
+      not_working: 'Akkaunt ishlamayapti (login/parol noto‘g‘ri)',
+      wrong_info: 'E’londagi ma’lumot haqiqatga mos emas',
+      recovered: 'Asl egasi akkauntni qaytarib oldi',
       other: 'Boshqa sabab',
     };
-
     const reason = reasonMap[reasonType] || 'Boshqa sabab';
 
     const owned = await loadOwnedEscrow(ctx.from!.id, escrowId);
@@ -296,72 +469,77 @@ buyerHandler.action(/^refund_reason_(.+?)_(.+)$/, async (ctx) => {
       return;
     }
 
-    await ctx.answerCbQuery(`Sabab: ${reason}`);
-
     const escrow = await EscrowHold.findById(escrowId)
       .populate('buyerId')
       .populate('sellerId')
       .populate('productId');
-
     if (!escrow) {
-      await ctx.reply('Buyurtma topilmadi.');
+      await ctx.answerCbQuery('Buyurtma topilmadi');
       return;
     }
 
-    const result = await paymentService.processRefund(escrowId, reason);
+    const result = await paymentService.processRefund(escrowId, reason, owned.user._id.toString());
 
-    if (result.allowed) {
-      const refundMessage = `
-🔄 <b>Qaytarish Natijasi</b>
+    if (!result.allowed) {
+      await ctx.editMessageText(`❌ <b>Qaytarish mumkin emas</b>\n\n${result.message}`, {
+        parse_mode: 'HTML',
+      });
+      await ctx.answerCbQuery();
+      return;
+    }
 
-✅ <b>Qaytarish tasdiqlandi!</b>
+    await ctx.editMessageText(
+      [
+        `🔄 <b>Qaytarish bajarildi</b>`,
+        '',
+        `<b>Sabab:</b> ${reason}`,
+        `<b>Jarima:</b> ${formatUzs(result.penaltyAmount ?? 0)}`,
+        `<b>Balansingizga qaytarildi:</b> <b>${formatUzs(result.refundToBuyer ?? 0)}</b>`,
+        '',
+        `<i>Pulni kartangizga yechish uchun “💰 Balans” → “Pul yechish”.</i>`,
+      ].join('\n'),
+      { parse_mode: 'HTML' }
+    );
+    await ctx.answerCbQuery('Qaytarildi');
 
-<b>Sabab:</b> ${reason}
-<b>Davr:</b> ${result.period}
-<b>Jarima:</b> ${result.penaltyAmount?.toLocaleString() || 0} UZS
-<b>Sizga qaytarildi:</b> ${result.refundToBuyer?.toLocaleString() || 0} UZS
+    const product = escrow.productId as any;
+    const buyer = escrow.buyerId as any;
+    const seller = escrow.sellerId as any;
 
-${result.message}
-      `.trim();
+    await notificationService.notifyRefundToAdmin({
+      buyer: `@${buyer.username || buyer.telegramId}`,
+      seller: `@${seller.username || seller.telegramId}`,
+      productTitle: product?.title || '—',
+      amount: escrow.amount,
+      reason,
+      quote: result.quote,
+      escrowId,
+      sellerId: String(seller._id),
+      productId: String(product?._id),
+    });
 
-      await ctx.editMessageText(refundMessage, { parse_mode: 'HTML' });
-
-      const product = escrow.productId as any;
-      const buyer = escrow.buyerId as any;
-      const seller = escrow.sellerId as any;
-
-      await notificationService.notifyRefundToAdmin(
-        `@${buyer.username || buyer.telegramId}`,
-        `@${seller.username || seller.telegramId}`,
-        product.title,
-        escrow.amount,
-        reason,
-        result,
-        escrowId
-      );
-
-      if (seller.telegramId) {
-        await notificationService.notifySeller(
-          seller.telegramId,
-          `🔄 <b>Qaytarish amalga oshirildi</b>\n\n` +
-          `Mahsulot: ${product.title}\n` +
-          `Sabab: ${reason}\n` +
-          `Jarima: ${result.penaltyAmount?.toLocaleString() || 0} UZS\n` +
-          `Sizga o\'tkazildi: ${result.sellerKeeps?.toLocaleString() || 0} UZS`
-        );
-      }
-    } else {
-      await ctx.editMessageText(
-        `❌ <b>Qaytarish mumkin emas</b>\n\n${result.message}`,
-        { parse_mode: 'HTML' }
+    if (seller?.telegramId) {
+      await notificationService.notifySeller(
+        seller.telegramId,
+        [
+          `🔄 <b>Xaridor qaytarish so‘radi</b>`,
+          '',
+          `Mahsulot: ${escapeHtml(product?.title || '—')}`,
+          `Sabab: ${reason}`,
+          `Sizga kompensatsiya: <b>${formatUzs(result.sellerKeeps ?? 0)}</b>`,
+          '',
+          `<i>Agar xaridor akkauntni o‘zlashtirib olib qaytargan bo‘lsa — dalil bilan ` +
+            `nizo oching: ${botApi.supportLink()}</i>`,
+        ].join('\n')
       );
     }
   } catch (error: any) {
     if (error instanceof AlreadyProcessedError) {
-      await ctx.answerCbQuery('Bu buyurtma allaqachon qayta ishlangan.');
+      await ctx.answerCbQuery('Bu buyurtma allaqachon yopilgan');
       return;
     }
-    await ctx.answerCbQuery(`Xatolik: ${error.message}`);
+    console.error('[Buyer] refund failed:', error);
+    await ctx.answerCbQuery('Xatolik yuz berdi');
   }
 });
 
@@ -373,13 +551,17 @@ buyerHandler.action(/^refund_cancel_(.+)$/, async (ctx) => {
 buyerHandler.action(/^help_escrow_(.+)$/, async (ctx) => {
   await ctx.answerCbQuery();
   await ctx.replyWithHTML(
-    '<b>❓ Escrow Yordam</b>\n\n' +
-    '<b>✅ Tasdiqlayman</b> — Akkaunt bilan hammasi joyida, pulni sotuvchiga o\'tkazish.\n' +
-    '<b>🔄 Qaytarish</b> — Akkauntda muammo bo\'lsa, pulni qaytarib olish.\n\n' +
-    '<b>Qaytarish shartlari:</b>\n' +
-    '• 0-10 daqiqa: to\'liq qaytarish\n' +
-    '• 10 min - 2 soat: 10% jarima\n' +
-    '• 2-24 soat: 50% jarima\n' +
-    '• 24 soatdan oshsa: qaytarish mumkin emas'
+    [
+      `<b>❓ Escrow qanday ishlaydi</b>`,
+      '',
+      `<b>✅ Tasdiqlayman</b> — akkaunt joyida, pul sotuvchiga o‘tadi.`,
+      `<b>🔄 Qaytarish</b> — muammo bo‘lsa, siyosat bo‘yicha pul qaytariladi.`,
+      '',
+      `<b>Qaytarish shartlari</b> (ma’lumotlarni ochgan vaqtdan hisoblanadi):`,
+      describeRefundPolicy(),
+      '',
+      `<i>Vaqt to‘lov emas, ma’lumotlarni ochgan daqiqadan boshlanadi — ` +
+        `to‘lov siz uxlab yotganingizda tasdiqlanishi mumkin.</i>`,
+    ].join('\n')
   );
 });

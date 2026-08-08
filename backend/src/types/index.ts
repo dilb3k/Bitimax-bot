@@ -1,21 +1,65 @@
-export type UserRole = 'buyer' | 'seller' | 'admin';
-export type ProductStatus = 'active' | 'sold' | 'refunded' | 'disputed';
-export type TransactionStatus = 'pending_payment' | 'paid' | 'expired' | 'refunded' | 'completed';
-export type EscrowStatus = 'holding' | 'released' | 'refunded' | 'partial_refunded';
-export type RefundPeriod = '0-10min' | '10min-2h' | '2h-24h' | 'over24h';
+export type UserRole = 'buyer' | 'seller' | 'admin' | 'moderator';
+export type Language = 'uz' | 'ru' | 'en';
+export type TrustLevel = 'new' | 'verified' | 'trusted' | 'partner';
 
-export interface RefundResult {
+export type ProductStatus =
+  | 'draft' // seller is still filling it in
+  | 'pending_review' // waiting for moderation
+  | 'rejected' // moderation refused it
+  | 'active' // listed and buyable
+  | 'reserved' // a buyer holds it while their payment window runs
+  | 'sold'
+  | 'refunded'
+  | 'disputed'
+  | 'archived';
+
+export type TransactionStatus =
+  | 'pending_payment'
+  | 'paid'
+  | 'expired'
+  | 'cancelled'
+  | 'refunded'
+  | 'completed';
+
+export type EscrowStatus = 'holding' | 'released' | 'refunded' | 'partial_refunded' | 'disputed';
+
+export type DisputeStatus =
+  | 'open'
+  | 'under_review'
+  | 'resolved_buyer'
+  | 'resolved_seller'
+  | 'resolved_split'
+  | 'cancelled';
+
+export type PayoutStatus = 'requested' | 'approved' | 'processing' | 'paid' | 'rejected' | 'failed';
+
+export type PaymentInboxStatus = 'matched' | 'unmatched' | 'duplicate' | 'ignored' | 'resolved';
+
+export interface RefundQuote {
   allowed: boolean;
+  /** Tier id from config.refundTiers, e.g. '0-10min'. */
+  period: string;
+  label: string;
   penaltyPercent: number;
-  refundPercent: number;
-  period: RefundPeriod;
+  /** Exactly what the buyer receives back. */
+  refundToBuyer: number;
+  /** Total forfeited by the buyer (split between seller and platform). */
+  penaltyAmount: number;
+  /** Platform's cut of the penalty pool. */
+  platformKeeps: number;
+  /** Seller's compensation out of the penalty pool. */
+  sellerKeeps: number;
+  /** Minutes elapsed on the clock the quote was computed against. */
+  elapsedMinutes: number;
+  requiresArbitration: boolean;
   message: string;
 }
 
 export interface PaymentInfo {
   expectedAmount: number;
   uniqueAmount: number;
-  qrCode?: string;
   cardNumber?: string;
+  cardHolder?: string;
   bankName?: string;
+  expiresAt: Date;
 }

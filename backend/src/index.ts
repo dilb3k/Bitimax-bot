@@ -5,6 +5,7 @@ import rateLimit from 'express-rate-limit';
 import { config } from './config';
 import { connectDatabase } from './db/mongoose';
 import { startBot } from './bot';
+import { startScheduler, stopScheduler } from './jobs/scheduler';
 import smsWebhookRoutes from './routes/smsWebhook';
 import productRoutes from './routes/products';
 import transactionRoutes from './routes/transactions';
@@ -70,6 +71,14 @@ async function start() {
   // one Mongo connection above. Keeps the whole platform to a single deployable
   // service instead of paying for + operating two.
   await startBot();
+
+  // Payment expiry, escrow auto-settlement, reconciliation. Set JOBS_ENABLED=false on any
+  // extra replica so only one instance sweeps.
+  startScheduler();
+
+  for (const signal of ['SIGINT', 'SIGTERM'] as const) {
+    process.once(signal, () => stopScheduler());
+  }
 }
 
 start().catch((err) => {

@@ -1,0 +1,78 @@
+# Render Blueprint for the Bitimax backend.
+#
+# Import in the Render dashboard: New → Blueprint → pick this repository.
+#
+# The backend is ONE long-running process that holds the Express API, the Telegraf bot
+# (long polling) and the scheduler. That rules out Render's free instance type: free
+# services are spun down after ~15 minutes of inactivity, and a spun-down bot stops
+# answering, stops expiring payment windows, and stops releasing escrow on time. The
+# `starter` plan below keeps it always on.
+
+services:
+  - type: web
+    name: bitimax-backend
+    runtime: docker
+    plan: starter # never `free` — see the note above
+    region: frankfurt # closest Render region to Uzbekistan
+    dockerfilePath: ./backend/Dockerfile
+    dockerContext: ./backend
+    healthCheckPath: /health
+    autoDeploy: true
+
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: PORT
+        value: 3001
+
+      # ─── Secrets: sync:false means Render prompts for the value and never stores it
+      #     in this file. Nothing secret is ever committed to the repository.
+      - key: MONGODB_URI
+        sync: false
+      - key: BOT_TOKEN
+        sync: false
+      - key: ADMIN_CHAT_ID
+        sync: false
+      - key: WEBHOOK_SECRET
+        sync: false
+      - key: INTERNAL_API_KEY
+        sync: false
+      # Losing this makes every stored credential permanently unreadable. Back it up
+      # somewhere outside Render before the first deploy.
+      - key: ENCRYPTION_KEY
+        sync: false
+      # JSON array of the bank cards buyers transfer into.
+      - key: PAYMENT_CARDS
+        sync: false
+
+      # ─── Business rules: safe to keep in the repo, tune without redeploying secrets.
+      - key: PLATFORM_COMMISSION
+        value: 7
+      - key: PAYMENT_WINDOW_MINUTES
+        value: 10
+      - key: AUTO_RELEASE_HOURS
+        value: 24
+      - key: UNREVEALED_GRACE_HOURS
+        value: 72
+      - key: MIN_PAYOUT_AMOUNT
+        value: 10000
+      - key: REFUND_ABUSE_THRESHOLD
+        value: 3
+      - key: CREDENTIAL_RETENTION_DAYS
+        value: 30
+
+      # ─── Web
+      - key: SITE_URL
+        sync: false
+      - key: CORS_ORIGINS
+        sync: false
+      - key: BOT_USERNAME
+        sync: false
+      - key: SUPPORT_USERNAME
+        sync: false
+
+      # Only one instance may run the expiry / auto-release / reconciliation sweeps.
+      # If this service is ever scaled past one instance, the extras must set this to
+      # false, or every sweep runs several times over.
+      - key: JOBS_ENABLED
+        value: true

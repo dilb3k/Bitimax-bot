@@ -7,7 +7,10 @@
     "build": "tsc",
     "start": "node dist/index.js",
     "bot": "tsx watch src/bot/index.ts",
-    "bot:build": "tsc && node dist/bot/index.js"
+    "bot:build": "tsc && node dist/bot/index.js",
+    "migrate": "tsx src/scripts/migrate.ts",
+    "test": "node --import tsx --test \"src/**/*.test.ts\"",
+    "typecheck": "tsc --noEmit"
   },
   "dependencies": {
     "cors": "^2.8.5",
