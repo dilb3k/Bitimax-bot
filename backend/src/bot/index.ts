@@ -7,13 +7,15 @@ import { sellerHandler, createSellerWizard } from './handlers/seller';
 import { buyerHandler } from './handlers/buyer';
 import { adminHandler } from './handlers/admin';
 
-async function startBot() {
-  await connectDatabase();
-
+/**
+ * Starts the Telegraf bot (long-polling). Assumes the caller has already connected to
+ * the database — this lets it run either standalone (see the bottom of this file) or
+ * embedded in the same process as the HTTP API (see src/index.ts), sharing one Mongo
+ * connection instead of opening two.
+ */
+export async function startBot(): Promise<void> {
   if (!config.botToken || config.botToken === 'YOUR_BOT_TOKEN_HERE') {
-    console.error('[Bot] BOT_TOKEN is not configured!');
-    console.error('[Bot] Please set BOT_TOKEN in .env file');
-    process.exit(1);
+    throw new Error('[Bot] BOT_TOKEN is not configured! Please set BOT_TOKEN in .env file');
   }
 
   const bot = new Telegraf(config.botToken);
@@ -100,13 +102,28 @@ async function startBot() {
     console.error(`[Bot] Error for ${ctx.updateType}:`, err);
   });
 
-  // Launch
-  await bot.launch();
-  console.log(`[Bot] Bitimax bot started`);
+  // Launch. In long-polling mode bot.launch() only resolves once the bot is stopped
+  // (its internal loop runs until then) — awaiting it here would hang startBot()
+  // forever and, when embedded in the HTTP server process, block start() from ever
+  // finishing. Fire it and log/handle errors via the returned promise instead.
+  bot.launch().catch((err) => {
+    console.error('[Bot] Fatal polling error:', err);
+  });
+  console.log('[Bot] Bitimax bot started (long polling)');
 
   // Enable graceful stop
   process.once('SIGINT', () => bot.stop('SIGINT'));
   process.once('SIGTERM', () => bot.stop('SIGTERM'));
 }
 
-startBot().catch(console.error);
+// Allows `npm run bot` to still run the bot as its own standalone process (e.g. if this
+// ever gets split back out to a separate worker). When imported by src/index.ts instead,
+// none of this runs — the importer calls startBot() itself after connecting the DB.
+if (require.main === module) {
+  connectDatabase()
+    .then(startBot)
+    .catch((err) => {
+      console.error('[Bot] Fatal startup error:', err);
+      process.exit(1);
+    });
+}

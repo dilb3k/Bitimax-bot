@@ -4,6 +4,7 @@ import helmet from 'helmet';
 import rateLimit from 'express-rate-limit';
 import { config } from './config';
 import { connectDatabase } from './db/mongoose';
+import { startBot } from './bot';
 import smsWebhookRoutes from './routes/smsWebhook';
 import productRoutes from './routes/products';
 import transactionRoutes from './routes/transactions';
@@ -64,6 +65,11 @@ async function start() {
     console.log(`[Server] Transactions API: GET /api/transactions (internal)`);
     console.log(`[Server] Escrow API: GET /api/escrow (internal)`);
   });
+
+  // Runs the Telegram bot (long-polling) in this same process/service, sharing the
+  // one Mongo connection above. Keeps the whole platform to a single deployable
+  // service instead of paying for + operating two.
+  await startBot();
 }
 
 start().catch((err) => {

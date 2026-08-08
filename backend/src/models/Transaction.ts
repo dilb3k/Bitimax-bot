@@ -23,7 +23,10 @@ const TransactionSchema = new Schema<ITransaction>(
     sellerId: { type: Schema.Types.ObjectId, ref: 'User', required: true, index: true },
     basePrice: { type: Number, required: true, min: 0 },
     expectedAmount: { type: Number, required: true, min: 0 },
-    uniqueAmount: { type: Number, required: true, min: 0, index: true },
+    // Indexed below via the partial unique index instead of `index: true` here — a plain
+    // field-level index plus a schema-level index on the same path is redundant and Mongoose
+    // warns about it.
+    uniqueAmount: { type: Number, required: true, min: 0 },
     status: {
       type: String,
       enum: ['pending_payment', 'paid', 'expired', 'refunded', 'completed'],
