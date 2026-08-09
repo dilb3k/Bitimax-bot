@@ -140,17 +140,71 @@ export async function startBot(): Promise<void> {
     console.error(`[Bot] Error handling ${ctx?.updateType}:`, err);
   });
 
-  // Launch. In long-polling mode bot.launch() only resolves once the bot is stopped
-  // (its internal loop runs until then) — awaiting it here would hang startBot()
-  // forever and, when embedded in the HTTP server process, block start() from ever
-  // finishing. Fire it and log/handle errors via the returned promise instead.
-  bot.launch({ dropPendingUpdates: true }).catch((err) => {
-    console.error('[Bot] Fatal polling error:', err);
-  });
-  console.log('[Bot] Bitimax bot started (long polling)');
+  // In long-polling mode bot.launch() only resolves once the bot is stopped (its internal
+  // loop runs until then), so awaiting it here would hang startBot() forever and, when
+  // embedded in the HTTP server process, block start() from ever finishing. It is launched
+  // in the background and supervised instead.
+  launchWithRetry(bot);
 
-  process.once('SIGINT', () => bot.stop('SIGINT'));
-  process.once('SIGTERM', () => bot.stop('SIGTERM'));
+  process.once('SIGINT', () => {
+    stopping = true;
+    bot.stop('SIGINT');
+  });
+  process.once('SIGTERM', () => {
+    stopping = true;
+    bot.stop('SIGTERM');
+  });
+}
+
+let stopping = false;
+
+/**
+ * Keeps the bot polling across transient Telegram failures.
+ *
+ * The one that matters is 409 Conflict. Render (like most platforms) does a zero-downtime
+ * rollout: the new instance boots while the old one is still draining, so for a few seconds
+ * two processes poll the same token and Telegram rejects one of them. Telegraf treats that as
+ * fatal and stops the polling loop for good — which meant every single deploy left the bot
+ * silently dead until someone noticed and restarted it by hand.
+ *
+ * Retrying with backoff rides out the overlap: the loser waits, the old instance finishes
+ * shutting down, and the next attempt succeeds.
+ */
+async function launchWithRetry(bot: Telegraf<any>): Promise<void> {
+  const MAX_ATTEMPTS = 20;
+
+  for (let attempt = 1; attempt <= MAX_ATTEMPTS && !stopping; attempt++) {
+    try {
+      if (attempt === 1) console.log('[Bot] Bitimax bot starting (long polling)…');
+      // Resolves only once the bot is stopped, so reaching the next line means a clean stop.
+      await bot.launch({ dropPendingUpdates: true });
+      console.log('[Bot] Polling loop ended cleanly');
+      return;
+    } catch (err: any) {
+      if (stopping) return;
+
+      const code = err?.response?.error_code ?? err?.code;
+      const isConflict = code === 409;
+
+      if (!isConflict && attempt >= 5) {
+        console.error('[Bot] Giving up after repeated non-conflict failures:', err?.message || err);
+        return;
+      }
+
+      // Cap the wait at 30s: a deploy overlap clears in well under a minute, and a longer
+      // backoff would just extend the window where the bot answers nobody.
+      const waitMs = Math.min(30_000, 3_000 * 2 ** Math.min(attempt - 1, 4));
+      console.warn(
+        `[Bot] Polling failed (${isConflict ? '409 conflict — another instance is still polling' : code || 'unknown'}). ` +
+          `Retry ${attempt}/${MAX_ATTEMPTS} in ${Math.round(waitMs / 1000)}s`
+      );
+      await new Promise((resolve) => setTimeout(resolve, waitMs));
+    }
+  }
+
+  if (!stopping) {
+    console.error('[Bot] Could not start polling after all retries — bot is NOT running');
+  }
 }
 
 // Allows `npm run bot` to still run the bot as its own standalone process (e.g. if this
