@@ -135,7 +135,7 @@ async function loadOwnedEscrow(telegramId: number, escrowId: string) {
   return { escrow, user };
 }
 
-buyerHandler.hears('🛍 Mahsulotlar', async (ctx) => {
+buyerHandler.hears(['🛍 Akkaunt sotib olish', '🛍 Mahsulotlar'], async (ctx) => {
   const { products, total, pages } = await botApi.getActiveProducts(1, 10);
 
   if (products.length === 0) {

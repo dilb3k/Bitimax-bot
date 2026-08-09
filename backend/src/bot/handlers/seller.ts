@@ -10,7 +10,7 @@ import {
   sellerMenuKeyboard,
   backButton,
   mainMenuKeyboard,
-  sellModeButtons,
+  dealSideButtons,
 } from '../keyboards';
 
 export const sellerHandler = new Composer();
@@ -31,7 +31,7 @@ export const CATEGORIES = [
   'Boshqa',
 ];
 
-sellerHandler.hears('➕ Yangi e’lon', async (ctx) => {
+sellerHandler.hears(['💼 Akkaunt sotish', '➕ Yangi e’lon'], async (ctx) => {
   const user = await User.findOne({ telegramId: ctx.from!.id });
   if (!user) return;
 
@@ -40,12 +40,9 @@ sellerHandler.hears('➕ Yangi e’lon', async (ctx) => {
     return;
   }
 
-  if (user.role !== 'seller' && user.role !== 'admin') {
-    await ctx.replyWithHTML(
-      `❌ Siz hali sotuvchi emassiz.\n\n` +
-        `Sotuvchi bo‘lish uchun “⚙️ Sozlamalar” → “🧑‍💼 Sotuvchi bo‘lish” ni bosing.`
-    );
-    return;
+  if (user.role === 'buyer') {
+    user.role = 'seller';
+    await user.save();
   }
 
   // Trust-based limits: a brand-new account cannot list twenty expensive accounts at once,
@@ -64,40 +61,11 @@ sellerHandler.hears('➕ Yangi e’lon', async (ctx) => {
     return;
   }
 
-  // Two very different jobs share this button. Most sellers arriving here already have a
-  // buyer waiting in another chat and only want the escrow — sending them through catalog
-  // moderation would make them wait hours for a deal they could have closed in a minute.
-  await ctx.replyWithHTML(
-    [
-      `<b>🤝 Qanday sotmoqchisiz?</b>`,
-      '',
-      `<b>1️⃣ Kelishilgan bitim (kod bilan)</b>`,
-      `Xaridor allaqachon topilgan. Bitimax faqat <b>kafil</b> bo‘ladi.`,
-      `• Katalogga tushmaydi, hech kim ko‘rmaydi`,
-      `• Moderatsiya kutilmaydi — <b>darhol</b> tayyor`,
-      `• Siz kod olasiz, xaridorga berasiz`,
-      '',
-      `<b>2️⃣ Bozorga qo‘yish</b>`,
-      `Xaridor yo‘q, e’lon katalogda turadi.`,
-      `• Barcha xaridorlar ko‘radi`,
-      `• Avval moderator tekshiradi`,
-      '',
-      `<i>Ikkalasida ham escrow himoyasi va ${config.platformCommission}% komissiya bir xil.</i>`,
-    ].join('\n'),
-    sellModeButtons()
-  );
-});
-
-sellerHandler.action('sell_mode_public', async (ctx) => {
-  const user = await User.findOne({ telegramId: ctx.from!.id });
-  if (!user) return void ctx.answerCbQuery('Foydalanuvchi topilmadi');
-
-  await ctx.answerCbQuery();
   await ctx.replyWithHTML(
     [
       `<b>⚠️ MUHIM OGOHLANTIRISH</b>`,
       '',
-      `Siz raqamli akkaunt e’lon qilmoqchisiz. Davom etish bilan quyidagilarni tasdiqlaysiz:`,
+      `Siz akkauntni <b>bozorga</b> qo‘ymoqchisiz — e’lon katalogda hamma uchun ko‘rinadi.`,
       '',
       `• Platformadan tashqaridagi kelishuvlarga tizim javob bermaydi`,
       `• Muvaffaqiyatli bitimdan <b>${config.platformCommission}% komissiya</b> ushlanadi`,
@@ -108,19 +76,50 @@ sellerHandler.action('sell_mode_public', async (ctx) => {
       `<b>Soxta akkaunt = bloklash + barcha e’lonlar arxivi.</b>`,
       '',
       `<i>Narx chegarangiz: ${formatUzs(botApi.priceCeilingFor(user))}</i>`,
+      `<i>Xaridor allaqachon topilgan bo‘lsa — “🤝 Kafil bitim” ni tanlang.</i>`,
     ].join('\n'),
     confirmSellerWarning()
   );
 });
 
+/**
+ * The escrow-only path, shown as its own menu entry because it is a different job from
+ * listing on the marketplace: the two people already agreed, they just want a guarantor.
+ */
+sellerHandler.hears(['🤝 Kafil bitim (escrow)', '🤝 Kafil bitim'], async (ctx) => {
+  const user = await User.findOne({ telegramId: ctx.from!.id });
+  if (!user || user.isBlocked) return;
+
+  await ctx.replyWithHTML(
+    [
+      `<b>🤝 Kafil bitim</b>`,
+      '',
+      `Xaridor va sotuvchi allaqachon kelishgan bo‘lsa, Bitimax o‘rtada turadi:`,
+      `pul kafilda saqlanadi, xaridor akkauntni tekshiradi, keyin pul sotuvchiga o‘tadi.`,
+      '',
+      `• Katalogda ko‘rinmaydi — faqat kod bilan ochiladi`,
+      `• Moderatsiya kutilmaydi, darhol ishlaydi`,
+      `• Komissiya ${config.platformCommission}% (sotuvchidan)`,
+      '',
+      `<i>Siz qaysi tomondasiz?</i>`,
+    ].join('\n'),
+    dealSideButtons()
+  );
+});
+
+sellerHandler.action('deal_side_seller', async (ctx) => {
+  await ctx.answerCbQuery();
+  await (ctx as any).scene?.enter(DEAL_WIZARD);
+});
+
+sellerHandler.action('deal_side_buyer', async (ctx) => {
+  await ctx.answerCbQuery();
+  await (ctx as any).scene?.enter('deal_code');
+});
+
 sellerHandler.action('seller_accept_warning', async (ctx) => {
   await ctx.answerCbQuery();
   await (ctx as any).scene?.enter(SELLER_WIZARD);
-});
-
-sellerHandler.action('sell_mode_private', async (ctx) => {
-  await ctx.answerCbQuery();
-  await (ctx as any).scene?.enter(DEAL_WIZARD);
 });
 
 sellerHandler.action('seller_cancel', async (ctx) => {
@@ -142,14 +141,14 @@ sellerHandler.action(/^deal_cancel_(.+)$/, async (ctx) => {
   await ctx.answerCbQuery('Bekor qilindi');
 });
 
-sellerHandler.hears('📋 Mening e’lonlarim', async (ctx) => {
+sellerHandler.hears(['📋 E’lonlarim', '📋 Mening e’lonlarim'], async (ctx) => {
   const user = await User.findOne({ telegramId: ctx.from!.id });
   if (!user) return;
 
   const products = await botApi.getUserProducts(user._id.toString());
 
   if (products.length === 0) {
-    await ctx.reply('Sizda hali e’lonlar yo‘q. “➕ Yangi e’lon” ni bosing.');
+    await ctx.reply('Sizda hali e’lonlar yo‘q. “💼 Akkaunt sotish” yoki “🤝 Kafil bitim” ni bosing.');
     return;
   }
 

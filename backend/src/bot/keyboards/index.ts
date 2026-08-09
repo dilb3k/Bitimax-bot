@@ -1,17 +1,39 @@
 import { Markup } from 'telegraf';
 
-export const mainMenuKeyboard = Markup.keyboard([
-  ['🛍 Mahsulotlar', '🔑 Kod bilan sotib olish'],
-  ['📦 Mening buyurtmalarim', '💰 Balans'],
-  ['⚙️ Sozlamalar', '❓ Yordam'],
-]).resize();
+/**
+ * One menu for everyone.
+ *
+ * There used to be three — buyer, seller and admin — and each hid the others' actions. The
+ * platform's two reasons to exist (trade an account through the catalog, or run an already
+ * agreed deal through escrow) were therefore invisible depending on who you happened to be:
+ * an admin saw only moderation queues, a new user saw no way to sell at all. Role now decides
+ * what a button *does*, never whether the button is on screen.
+ */
+export function mainMenu(isAdmin = false) {
+  const rows = [
+    ['🛍 Akkaunt sotib olish', '💼 Akkaunt sotish'],
+    ['🤝 Kafil bitim (escrow)'],
+    ['📦 Buyurtmalarim', '📋 E’lonlarim'],
+    ['💰 Balans', '⚙️ Sozlamalar'],
+    ['❓ Yordam'],
+  ];
+  if (isAdmin) rows.push(['🛡 Admin panel']);
+  return Markup.keyboard(rows).resize();
+}
 
-export const sellerMenuKeyboard = Markup.keyboard([
-  ['➕ Yangi e’lon', '🔑 Kod bilan sotib olish'],
-  ['📋 Mening e’lonlarim', '📦 Buyurtmalarim'],
-  ['💰 Balans', '📊 Statistika'],
-  ['⚙️ Sozlamalar', '🏠 Asosiy menu'],
-]).resize();
+/** Default keyboard for the many call sites that just need "the normal menu". */
+export const mainMenuKeyboard = mainMenu(false);
+
+/** Retained so existing seller-flow call sites keep compiling; same menu for everyone now. */
+export const sellerMenuKeyboard = mainMenuKeyboard;
+
+/** The two sides of an agreed deal — one screen, so neither party hunts for their half. */
+export function dealSideButtons() {
+  return Markup.inlineKeyboard([
+    [Markup.button.callback('📤 Men sotyapman — kod yaratish', 'deal_side_seller')],
+    [Markup.button.callback('📥 Men sotib olyapman — kodim bor', 'deal_side_buyer')],
+  ]);
+}
 
 /** The fork every seller hits: escrow-only handover, or a public catalog listing. */
 export function sellModeButtons() {
@@ -28,11 +50,12 @@ export function dealBuyButtons(productId: string) {
   ]);
 }
 
+/** Admin tools sit behind one button rather than replacing the whole menu. */
 export const adminMenuKeyboard = Markup.keyboard([
   ['👥 Foydalanuvchilar', '📊 Statistika'],
   ['🛡 Moderatsiya', '💸 To‘lov so‘rovlari'],
   ['📥 To‘lov inbox', '⚖️ Nizolar'],
-  ['⚙️ Sozlamalar', '🏠 Asosiy menu'],
+  ['🏠 Asosiy menu'],
 ]).resize();
 
 export const balanceKeyboard = Markup.inlineKeyboard([

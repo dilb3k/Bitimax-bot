@@ -7,6 +7,7 @@ import { describeRefundPolicy } from '../../services/refundEngine';
 import { config } from '../../config';
 import { escapeHtml, formatUzs } from '../../utils/helpers';
 import {
+  mainMenu,
   mainMenuKeyboard,
   sellerMenuKeyboard,
   adminMenuKeyboard,
@@ -20,9 +21,7 @@ export const PAYOUT_WIZARD = 'payout_request';
 export const CARD_WIZARD = 'payout_card';
 
 export function keyboardFor(role: string) {
-  if (role === 'admin' || role === 'moderator') return adminMenuKeyboard;
-  if (role === 'seller') return sellerMenuKeyboard;
-  return mainMenuKeyboard;
+  return mainMenu(role === 'admin' || role === 'moderator');
 }
 
 startHandler.start(async (ctx) => {
@@ -49,24 +48,26 @@ startHandler.start(async (ctx) => {
 
   await ctx.replyWithHTML(
     [
-      `<b>🔰 Bitimax — xavfsiz raqamli bozor</b>`,
+      `<b>🔰 Bitimax — kafil bilan savdo</b>`,
       '',
-      `Bitimax P2P <b>escrow (kafil)</b> tizimida ishlaydi: pul siz tasdiqlamaguningizcha ` +
-        `sotuvchiga o‘tmaydi.`,
+      `Bitimax ikki ishni qiladi:`,
       '',
-      `<b>🛡 Qanday himoyalanasiz:</b>`,
-      `• To‘lov escrow’da saqlanadi`,
+      `<b>1️⃣ 🛍 Akkaunt bozori</b>`,
+      `Instagram, Telegram, TikTok, o‘yin akkauntlari — katalogdan sotib oling yoki`,
+      `o‘zingiznikini sotuvga qo‘ying.`,
+      '',
+      `<b>2️⃣ 🤝 Kafil bitim (escrow)</b>`,
+      `Xaridor va sotuvchi allaqachon kelishgan bo‘lsa, Bitimax o‘rtada turadi.`,
+      `Sotuvchi kod oladi, xaridor kodni kiritadi — pul kafilda saqlanadi.`,
+      '',
+      `<b>🛡 Ikkalasida ham himoya bir xil:</b>`,
+      `• Pul siz tasdiqlamaguningizcha sotuvchiga o‘tmaydi`,
       `• Avval akkauntni tekshirasiz, keyin tasdiqlaysiz`,
-      `• Muammo bo‘lsa — siyosat bo‘yicha pul qaytariladi`,
+      `• Muammo bo‘lsa — siyosat bo‘yicha qaytariladi`,
       '',
-      `<b>⏱ Qaytarish shartlari:</b>`,
-      describeRefundPolicy(),
-      '',
-      `<b>💰 Komissiya:</b> muvaffaqiyatli bitimdan ${config.platformCommission}% (sotuvchidan)`,
+      `<b>💰 Komissiya:</b> ${config.platformCommission}% (sotuvchidan, faqat muvaffaqiyatli bitimdan)`,
       '',
       `<i>⚠️ Platformadan tashqaridagi kelishuvlarga tizim javob bermaydi.</i>`,
-      '',
-      `🌐 To‘liq katalog: ${config.siteUrl}`,
     ].join('\n'),
     keyboardFor(user.role)
   );
@@ -76,11 +77,11 @@ function helpText(): string {
   return [
       `<b>❓ Yordam</b>`,
       '',
-      `<b>🤝 Kelishilgan bitim — kafil xizmati</b>`,
-      `Xaridor va sotuvchi allaqachon kelishgan bo‘lsa, Bitimax faqat kafil bo‘ladi:`,
-      `1. Sotuvchi: “➕ Yangi e’lon” → “🤝 Kelishilgan bitim”`,
+      `<b>🤝 Kafil bitim — kelishilgan savdo</b>`,
+      `Xaridor va sotuvchi bir-birini topgan bo‘lsa, Bitimax faqat kafil bo‘ladi:`,
+      `1. Sotuvchi: “🤝 Kafil bitim” → “Men sotyapman” → 4 ta savol`,
       `2. Sotuvchi <b>kod</b> oladi va xaridorga yuboradi`,
-      `3. Xaridor: “🔑 Kod bilan sotib olish” → kodni kiritadi`,
+      `3. Xaridor: “🤝 Kafil bitim” → “Men sotib olyapman” → kodni kiritadi`,
       `4. To‘laydi → akkauntni tekshiradi → tasdiqlaydi`,
       `<i>Katalogda ko‘rinmaydi, moderatsiya kutilmaydi — darhol ishlaydi.</i>`,
       '',
@@ -92,10 +93,10 @@ function helpText(): string {
       `5. Akkauntni tekshiring → “✅ Tasdiqlayman”`,
       `6. Faqat shundan keyin parolni o‘zgartiring`,
       '',
-      `<b>💼 Sotish</b>`,
-      `1. Sozlamalarda “Sotuvchi bo‘lish” ni bosing`,
-      `2. “➕ Yangi e’lon” → ma’lumotlarni kiriting`,
-      `3. Moderator tasdiqlaydi`,
+      `<b>💼 Bozorga sotuvga qo‘yish</b>`,
+      `1. “💼 Akkaunt sotish” ni bosing`,
+      `2. Ma’lumotlarni kiriting (nom, tavsif, narx, kategoriya, login/parol)`,
+      `3. Moderator tasdiqlaydi va e’lon katalogda paydo bo‘ladi`,
       `4. Xaridor tasdiqlagach yoki ${config.autoReleaseHours} soatdan keyin pul balansingizga tushadi`,
       '',
       `<b>⏱ Qaytarish shartlari</b> (ma’lumotni ochgan vaqtdan):`,
@@ -136,7 +137,7 @@ async function showBalance(ctx: any) {
   );
 }
 
-startHandler.hears('💰 Balans', showBalance);
+startHandler.hears(['💰 Balans'], showBalance);
 startHandler.command('balance', showBalance);
 
 startHandler.action('balance_statement', async (ctx) => {
@@ -259,6 +260,12 @@ startHandler.action('settings_language', async (ctx) => {
 startHandler.hears('🏠 Asosiy menu', async (ctx) => {
   const user = await User.findOne({ telegramId: ctx.from!.id });
   await ctx.reply('Asosiy menu', keyboardFor(user?.role || 'buyer'));
+});
+
+startHandler.hears('🛡 Admin panel', async (ctx) => {
+  const user = await User.findOne({ telegramId: ctx.from!.id });
+  if (user?.role !== 'admin' && user?.role !== 'moderator') return;
+  await ctx.reply('🛡 Admin paneli', adminMenuKeyboard);
 });
 
 /** Two short wizards for the withdrawal flow. */
