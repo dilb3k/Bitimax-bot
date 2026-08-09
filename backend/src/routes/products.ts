@@ -13,7 +13,9 @@ router.get('/', async (req: Request, res: Response) => {
     const { page = '1', limit = '20', category, search, sort = '-createdAt', minPrice, maxPrice } =
       req.query;
 
-    const filter: any = { status: 'active' };
+    // Private deals are reachable only by their code and must never appear in the catalog,
+    // so listingType leads every public query rather than being an afterthought filter.
+    const filter: any = { status: 'active', listingType: 'public' };
     if (category) filter.category = category;
 
     if (minPrice || maxPrice) {
@@ -69,7 +71,7 @@ router.get('/categories', async (_req: Request, res: Response) => {
   try {
     // Returns counts too, so the web filter can show "Instagram (24)" without a second call.
     const rows = await Product.aggregate([
-      { $match: { status: 'active' } },
+      { $match: { status: 'active', listingType: 'public' } },
       { $group: { _id: '$category', count: { $sum: 1 } } },
       { $sort: { count: -1 } },
     ]);
@@ -87,7 +89,7 @@ router.get('/categories', async (_req: Request, res: Response) => {
 router.get('/stats', async (_req: Request, res: Response) => {
   try {
     const [active, sold, sellers] = await Promise.all([
-      Product.countDocuments({ status: 'active' }),
+      Product.countDocuments({ status: 'active', listingType: 'public' }),
       Product.countDocuments({ status: 'sold' }),
       User.countDocuments({ role: 'seller' }),
     ]);
@@ -102,7 +104,7 @@ router.get('/:id', validateObjectId(), async (req: Request, res: Response) => {
     // Bumping the counter in the same round trip that fetches the document, rather than a
     // read followed by a write.
     const product = await Product.findOneAndUpdate(
-      { _id: req.params.id, status: { $in: ['active', 'reserved', 'sold'] } },
+      { _id: req.params.id, listingType: 'public', status: { $in: ['active', 'reserved', 'sold'] } },
       { $inc: { viewCount: 1 } },
       { new: true }
     )

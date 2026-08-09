@@ -5,8 +5,8 @@ import { mongoSessionStore } from '../models/BotSession';
 import { User } from '../models/User';
 import { notificationService } from '../services/notificationService';
 import { startHandler, createPayoutWizards, keyboardFor } from './handlers/start';
-import { sellerHandler, createSellerWizard, CATEGORIES } from './handlers/seller';
-import { buyerHandler } from './handlers/buyer';
+import { sellerHandler, createSellerWizard, createDealWizard, CATEGORIES } from './handlers/seller';
+import { buyerHandler, createCodeWizard } from './handlers/buyer';
 import { adminHandler } from './handlers/admin';
 import { botApi } from './services/api';
 import { escapeHtml, formatUzs } from '../utils/helpers';
@@ -25,7 +25,12 @@ export async function startBot(): Promise<void> {
   const bot = new Telegraf<any>(config.botToken);
   notificationService.setBot(bot);
 
-  const stage = new Scenes.Stage<any>([createSellerWizard(), ...createPayoutWizards()]);
+  const stage = new Scenes.Stage<any>([
+    createSellerWizard(),
+    createDealWizard(),
+    createCodeWizard(),
+    ...createPayoutWizards(),
+  ]);
 
   // Persisted in Mongo rather than Telegraf's default in-memory Map, so a deploy no longer
   // wipes every half-finished listing wizard and multiple replicas can share state.

@@ -2,30 +2,141 @@
 @tailwind components;
 @tailwind utilities;
 
+/*
+ * Palette: a sealed strongbox, not a fintech dashboard.
+ *
+ * The whole product is "your money is held under seal until you say otherwise", so the accent
+ * is a burnished gold — the colour of a wax seal and a guarantee stamp — against a warm paper
+ * ground in light and a deep cool ink in dark. Neutrals are biased slightly warm toward the
+ * accent so they read as chosen rather than inherited from a framework default.
+ */
 @layer base {
   :root {
-    --background: 0 0% 100%;
-    --foreground: 222.2 84% 4.9%;
+    --ground: 250 248 244; /* warm paper */
+    --surface: 255 255 255;
+    --raised: 244 241 235;
+    --line: 226 220 210;
+    --ink: 22 24 28;
+    --muted: 106 100 92;
+    --faint: 150 143 133;
+    /*
+     * Deep burnished bronze rather than a bright gold. A lighter gold looks better in
+     * isolation but carries white button text at only ~4.2:1 — under AA — and the primary
+     * CTA is the one thing on the page that must never be hard to read.
+     */
+    --seal: 138 92 20; /* white text on this: ~7.0:1 */
+    --seal-soft: 244 231 205;
+    --seal-ink: 255 255 255; /* text on a seal-filled surface */
+    --vault: 21 110 78;
+    --warn: 170 62 34;
   }
-}
 
-@layer base {
+  .dark {
+    --ground: 15 18 22;
+    --surface: 22 26 32;
+    --raised: 30 35 42;
+    --line: 46 53 62;
+    --ink: 238 235 230;
+    --muted: 158 152 144;
+    --faint: 116 111 104;
+    --seal: 216 156 61; /* lightened so it stays legible on ink */
+    --seal-soft: 58 44 22;
+    --seal-ink: 20 16 8;
+    --vault: 74 190 143;
+    --warn: 232 122 92;
+  }
+
+  * {
+    border-color: rgb(var(--line));
+  }
+
+  html {
+    scroll-behavior: smooth;
+  }
+
   body {
-    @apply bg-gray-50 text-gray-900 antialiased;
+    /* Explicit, token-driven: never inherit a ground from whatever hosts the page. */
+    background-color: rgb(var(--ground));
+    color: rgb(var(--ink));
+    -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility;
+  }
+
+  h1,
+  h2,
+  h3 {
+    font-family: var(--font-display), ui-sans-serif, system-ui, sans-serif;
+    text-wrap: balance;
+    letter-spacing: -0.02em;
+  }
+
+  /* Digits that sit in columns must not jitter as they change. */
+  .tnum {
+    font-variant-numeric: tabular-nums;
+  }
+
+  :focus-visible {
+    outline: 2px solid rgb(var(--seal));
+    outline-offset: 2px;
+    border-radius: 4px;
+  }
+
+  ::selection {
+    background: rgb(var(--seal) / 0.25);
   }
 }
 
 @layer components {
-  .btn-primary {
-    @apply bg-primary-600 hover:bg-primary-700 text-white font-medium py-2 px-4 rounded-lg transition-colors duration-200 disabled:opacity-50 disabled:cursor-not-allowed;
+  .btn {
+    @apply inline-flex items-center justify-center gap-2 rounded-lg font-medium
+           transition-colors duration-150 disabled:opacity-45 disabled:cursor-not-allowed;
   }
-  .btn-secondary {
-    @apply bg-gray-200 hover:bg-gray-300 text-gray-800 font-medium py-2 px-4 rounded-lg transition-colors duration-200;
+  .btn-seal {
+    @apply btn bg-seal text-[rgb(var(--seal-ink))] hover:brightness-110 px-4 py-2.5;
   }
-  .card {
-    @apply bg-white rounded-xl shadow-sm border border-gray-100 p-6 hover:shadow-md transition-shadow duration-200;
+  .btn-ghost {
+    @apply btn border border-line bg-surface text-ink hover:bg-raised px-4 py-2.5;
   }
-  .input-field {
-    @apply w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-transparent outline-none transition-all duration-200;
+
+  .field {
+    @apply w-full rounded-lg border border-line bg-surface px-3.5 py-2.5 text-ink
+           placeholder:text-faint outline-none transition
+           focus:border-seal focus:ring-2 focus:ring-seal/25;
+  }
+
+  .chip {
+    @apply inline-flex items-center gap-1.5 whitespace-nowrap rounded-full border border-line
+           bg-surface px-3 py-1.5 text-sm text-muted transition
+           hover:border-seal/50 hover:text-ink;
+  }
+  .chip-on {
+    @apply border-seal/60 bg-seal-soft text-ink;
+  }
+
+  .surface {
+    @apply rounded-card border border-line bg-surface;
+  }
+
+  /* Loading placeholder that sweeps rather than pulses — reads as work in progress. */
+  .skeleton {
+    @apply relative overflow-hidden rounded bg-raised;
+  }
+  .skeleton::after {
+    content: '';
+    @apply absolute inset-0;
+    transform: translateX(-100%);
+    background: linear-gradient(90deg, transparent, rgb(var(--line) / 0.55), transparent);
+    animation: shimmer 1.4s infinite;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
   }
 }

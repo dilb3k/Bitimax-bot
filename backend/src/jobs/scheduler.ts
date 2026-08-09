@@ -151,6 +151,29 @@ export async function purgeExpiredCredentials(): Promise<number> {
 }
 
 /**
+ * Retires private deal codes nobody redeemed.
+ *
+ * An unclaimed code is a live credential sitting in the database waiting for whoever ends up
+ * holding the message it was sent in. If the handover didn't happen within the window, the
+ * safe assumption is that it isn't going to.
+ */
+export async function expireUnclaimedDeals(): Promise<number> {
+  const result = await Product.updateMany(
+    {
+      listingType: 'private',
+      status: 'active',
+      dealExpiresAt: { $lt: new Date() },
+    },
+    { $set: { status: 'archived' }, $unset: { dealCode: '' } }
+  );
+
+  if (result.modifiedCount > 0) {
+    console.log(`[Jobs] Expired ${result.modifiedCount} unclaimed deal code(s)`);
+  }
+  return result.modifiedCount;
+}
+
+/**
  * Compares cached user balances against the ledger and shouts if they disagree. Silent drift
  * means some write path is moving money outside the journal, which is the one failure a
  * payments system must never discover from a customer complaint.
@@ -199,6 +222,7 @@ const JOBS: Job[] = [
   { name: 'alertUnmatchedPayments', intervalMs: 15 * 60_000, run: async () => void (await alertUnmatchedPayments()) },
   { name: 'reconcileBalances', intervalMs: 60 * 60_000, run: async () => void (await reconcileBalances()) },
   { name: 'purgeExpiredCredentials', intervalMs: 6 * 60 * 60_000, run: async () => void (await purgeExpiredCredentials()) },
+  { name: 'expireUnclaimedDeals', intervalMs: 30 * 60_000, run: async () => void (await expireUnclaimedDeals()) },
 ];
 
 export function startScheduler(): void {

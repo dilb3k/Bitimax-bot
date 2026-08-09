@@ -4,12 +4,19 @@ import { Product } from '../../models/Product';
 import { botApi } from '../services/api';
 import { notificationService } from '../../services/notificationService';
 import { config } from '../../config';
-import { escapeHtml, formatUzs } from '../../utils/helpers';
-import { confirmSellerWarning, sellerMenuKeyboard, backButton, mainMenuKeyboard } from '../keyboards';
+import { escapeHtml, formatUzs, formatDealCode } from '../../utils/helpers';
+import {
+  confirmSellerWarning,
+  sellerMenuKeyboard,
+  backButton,
+  mainMenuKeyboard,
+  sellModeButtons,
+} from '../keyboards';
 
 export const sellerHandler = new Composer();
 
 const SELLER_WIZARD = 'seller_create';
+export const DEAL_WIZARD = 'deal_create';
 
 /** Curated taxonomy. Free-text categories in v1 meant "Instagram", "instagram" and
  * "Инстаграм" were three different catalog buckets nobody could filter on. */
@@ -57,6 +64,35 @@ sellerHandler.hears('➕ Yangi e’lon', async (ctx) => {
     return;
   }
 
+  // Two very different jobs share this button. Most sellers arriving here already have a
+  // buyer waiting in another chat and only want the escrow — sending them through catalog
+  // moderation would make them wait hours for a deal they could have closed in a minute.
+  await ctx.replyWithHTML(
+    [
+      `<b>🤝 Qanday sotmoqchisiz?</b>`,
+      '',
+      `<b>1️⃣ Kelishilgan bitim (kod bilan)</b>`,
+      `Xaridor allaqachon topilgan. Bitimax faqat <b>kafil</b> bo‘ladi.`,
+      `• Katalogga tushmaydi, hech kim ko‘rmaydi`,
+      `• Moderatsiya kutilmaydi — <b>darhol</b> tayyor`,
+      `• Siz kod olasiz, xaridorga berasiz`,
+      '',
+      `<b>2️⃣ Bozorga qo‘yish</b>`,
+      `Xaridor yo‘q, e’lon katalogda turadi.`,
+      `• Barcha xaridorlar ko‘radi`,
+      `• Avval moderator tekshiradi`,
+      '',
+      `<i>Ikkalasida ham escrow himoyasi va ${config.platformCommission}% komissiya bir xil.</i>`,
+    ].join('\n'),
+    sellModeButtons()
+  );
+});
+
+sellerHandler.action('sell_mode_public', async (ctx) => {
+  const user = await User.findOne({ telegramId: ctx.from!.id });
+  if (!user) return void ctx.answerCbQuery('Foydalanuvchi topilmadi');
+
+  await ctx.answerCbQuery();
   await ctx.replyWithHTML(
     [
       `<b>⚠️ MUHIM OGOHLANTIRISH</b>`,
@@ -82,9 +118,28 @@ sellerHandler.action('seller_accept_warning', async (ctx) => {
   await (ctx as any).scene?.enter(SELLER_WIZARD);
 });
 
+sellerHandler.action('sell_mode_private', async (ctx) => {
+  await ctx.answerCbQuery();
+  await (ctx as any).scene?.enter(DEAL_WIZARD);
+});
+
 sellerHandler.action('seller_cancel', async (ctx) => {
   await ctx.answerCbQuery('Bekor qilindi');
-  await ctx.reply('E’lon yaratish bekor qilindi.', mainMenuKeyboard);
+  await ctx.reply('Bekor qilindi.', mainMenuKeyboard);
+});
+
+sellerHandler.action(/^deal_cancel_(.+)$/, async (ctx) => {
+  const user = await User.findOne({ telegramId: ctx.from!.id });
+  if (!user) return void ctx.answerCbQuery('Topilmadi');
+
+  const cancelled = await botApi.cancelDeal(ctx.match[1], String(user._id)).catch(() => null);
+  if (!cancelled) {
+    await ctx.answerCbQuery('Bitim topilmadi yoki allaqachon boshlangan');
+    return;
+  }
+
+  await ctx.editMessageText('❌ Bitim bekor qilindi, kod ishlamaydi.', { parse_mode: 'HTML' });
+  await ctx.answerCbQuery('Bekor qilindi');
 });
 
 sellerHandler.hears('📋 Mening e’lonlarim', async (ctx) => {
@@ -110,11 +165,19 @@ sellerHandler.hears('📋 Mening e’lonlarim', async (ctx) => {
     draft: '✏️',
   };
 
-  const lines = products.map(
-    (p) =>
-      `${emoji[p.status] || '•'} <b>${escapeHtml(p.title)}</b>\n` +
-      `   ${formatUzs(p.price)} — ${p.status}`
-  );
+  const lines = products.map((p) => {
+    const head = `${emoji[p.status] || '•'} <b>${escapeHtml(p.title)}</b>`;
+    const body = `   ${formatUzs(p.price)} — ${p.status}`;
+    // A live deal code is the one thing the seller comes back to this screen for — they need
+    // to re-send it when the buyer loses the message.
+    const code =
+      p.listingType === 'private' && p.dealCode && p.status === 'active'
+        ? `\n   🔑 Kod: <code>${formatDealCode(p.dealCode)}</code>`
+        : p.listingType === 'private'
+          ? `\n   🤝 Kelishilgan bitim`
+          : '';
+    return `${head}\n${body}${code}`;
+  });
 
   await ctx.replyWithHTML([`<b>📋 Mening e’lonlarim (${products.length})</b>`, '', ...lines].join('\n'));
 });
@@ -145,6 +208,150 @@ sellerHandler.hears('📊 Statistika', async (ctx) => {
     ].join('\n')
   );
 });
+
+/**
+ * Private deal wizard — four questions instead of the catalog listing's seven.
+ *
+ * Everything the public form asks for in order to *sell* the listing to a stranger (long
+ * description, category, tags) is dead weight here: the buyer already knows what they're
+ * getting and is waiting for the code. Asking anyway is how a one-minute handover turns into
+ * an abandoned form.
+ */
+export function createDealWizard() {
+  return new Scenes.WizardScene<any>(
+    DEAL_WIZARD,
+    async (ctx: any) => {
+      ctx.session.dealData = {};
+      await ctx.replyWithHTML(
+        [
+          `<b>🤝 Kelishilgan bitim — 1/4</b>`,
+          '',
+          `Nima sotyapsiz? Qisqa nom yozing:`,
+          `<i>masalan: “Instagram @mynick” yoki “Steam akkaunt CS2”</i>`,
+        ].join('\n'),
+        backButton()
+      );
+      return ctx.wizard.next();
+    },
+
+    async (ctx: any) => {
+      const text = ctx.message?.text?.trim();
+      if (!text || text.length < 3 || text.length > 120) {
+        await ctx.reply('Nom 3–120 belgi bo‘lishi kerak. Qaytadan kiriting:');
+        return;
+      }
+      ctx.session.dealData.title = text;
+
+      const user = await User.findOne({ telegramId: ctx.from!.id });
+      await ctx.replyWithHTML(
+        [
+          `<b>🤝 2/4 — Narx</b>`,
+          '',
+          `Kelishilgan summani so‘mda kiriting (faqat raqam):`,
+          user ? `<i>Chegarangiz: ${formatUzs(botApi.priceCeilingFor(user))}</i>` : '',
+        ].join('\n')
+      );
+      return ctx.wizard.next();
+    },
+
+    async (ctx: any) => {
+      const price = parseInt(String(ctx.message?.text || '').replace(/\D/g, ''), 10);
+      const user = await User.findOne({ telegramId: ctx.from!.id });
+      if (!user) return ctx.scene.leave();
+
+      if (isNaN(price) || price < 1000) {
+        await ctx.reply('Minimal summa 1 000 UZS. Qaytadan kiriting:');
+        return;
+      }
+      const ceiling = botApi.priceCeilingFor(user);
+      if (price > ceiling) {
+        await ctx.reply(`Darajangizda maksimal ${formatUzs(ceiling)}. Pastroq summa kiriting:`);
+        return;
+      }
+
+      ctx.session.dealData.price = price;
+      const commission = Math.round((price * config.platformCommission) / 100);
+
+      await ctx.replyWithHTML(
+        [
+          `<b>🤝 3/4 — Akkaunt logini</b>`,
+          '',
+          `<i>Siz olasiz: <b>${formatUzs(price - commission)}</b> (komissiya ${formatUzs(commission)})</i>`,
+          '',
+          `🔐 Login (email yoki username) ni kiriting:`,
+          `<i>Shifrlangan saqlanadi, xaridor faqat to‘lovdan keyin ko‘radi.</i>`,
+        ].join('\n')
+      );
+      return ctx.wizard.next();
+    },
+
+    async (ctx: any) => {
+      const text = ctx.message?.text?.trim();
+      if (!text) {
+        await ctx.reply('Iltimos, loginni kiriting:');
+        return;
+      }
+      ctx.session.dealData.login = text;
+      await ctx.reply('🔐 4/4 — Parolni kiriting:');
+      return ctx.wizard.next();
+    },
+
+    async (ctx: any) => {
+      const text = ctx.message?.text?.trim();
+      if (!text) {
+        await ctx.reply('Iltimos, parolni kiriting:');
+        return;
+      }
+      ctx.session.dealData.password = text;
+
+      const user = await User.findOne({ telegramId: ctx.from!.id });
+      if (!user) return ctx.scene.leave();
+
+      const data = ctx.session.dealData;
+      const deal = await botApi.createDeal({ sellerId: String(user._id), ...data });
+
+      // Wipe the plaintext password out of the session the moment it is persisted.
+      ctx.session.dealData = {};
+
+      const commission = Math.round((deal.price * config.platformCommission) / 100);
+      const code = formatDealCode(deal.dealCode!);
+
+      await ctx.replyWithHTML(
+        [
+          `✅ <b>Bitim tayyor!</b>`,
+          '',
+          `<b>${escapeHtml(deal.title)}</b>`,
+          `Summa: <b>${formatUzs(deal.price)}</b>`,
+          `Siz olasiz: <b>${formatUzs(deal.price - commission)}</b>`,
+          '',
+          `<b>🔑 Xaridorga shu kodni yuboring:</b>`,
+          `<code>${code}</code>`,
+          '',
+          `<i>Xaridor botga kirib “🔑 Kod bilan sotib olish” ni bosadi va shu kodni kiritadi.</i>`,
+          '',
+          `⏳ Kod 7 kun amal qiladi.`,
+        ].join('\n'),
+        {
+          reply_markup: {
+            inline_keyboard: [
+              [
+                {
+                  text: '📤 Xaridorga yuborish',
+                  // Prefilled forward: the seller picks the chat and Telegram sends the text.
+                  switch_inline_query: `\n\n🤝 Bitimax kafil bitimi\n${deal.title}\nSumma: ${formatUzs(deal.price)}\nKod: ${code}\n\nhttps://t.me/${config.botUsername}`,
+                },
+              ],
+              [{ text: '❌ Bitimni bekor qilish', callback_data: `deal_cancel_${deal._id}` }],
+            ],
+          },
+        }
+      );
+
+      await ctx.reply('Asosiy menu', sellerMenuKeyboard);
+      return ctx.scene.leave();
+    }
+  );
+}
 
 /**
  * Listing wizard. Each step validates before advancing so a bad value can't reach the

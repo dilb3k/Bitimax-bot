@@ -96,6 +96,38 @@ export function isValidUzCard(cardNumber: string): boolean {
   return digits.length === 16;
 }
 
+/**
+ * Alphabet for deal codes. I/O/0/1 are excluded because the code is read aloud, forwarded in
+ * chat and retyped by hand — "was that a one or an ell?" is a support ticket we don't need.
+ */
+const CODE_ALPHABET = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+
+/**
+ * Code the seller hands to their agreed buyer for a private escrow deal.
+ *
+ * Eight characters from a 32-symbol alphabet is 32^8 ≈ 1.1 × 10^12 combinations, drawn from a
+ * CSPRNG — far past guessing range, especially with the attempt limiter on the entry handler.
+ * Formatted in two groups because people copy it more reliably that way.
+ */
+export function generateDealCode(): string {
+  let code = '';
+  for (let i = 0; i < 8; i++) {
+    code += CODE_ALPHABET[crypto.randomInt(0, CODE_ALPHABET.length)];
+  }
+  return code;
+}
+
+/** `ABCD2345` → `ABCD-2345` for display. */
+export function formatDealCode(code: string): string {
+  const clean = normalizeDealCode(code);
+  return clean.length === 8 ? `${clean.slice(0, 4)}-${clean.slice(4)}` : clean;
+}
+
+/** Accepts whatever the buyer types — spaces, dashes, lowercase — and returns the stored form. */
+export function normalizeDealCode(input: string): string {
+  return String(input).toUpperCase().replace(/[^A-Z0-9]/g, '');
+}
+
 /** Escapes HTML so user-supplied text can't inject markup into a Telegram HTML message. */
 export function escapeHtml(text: string): string {
   return String(text)

@@ -1,16 +1,32 @@
 import { Markup } from 'telegraf';
 
 export const mainMenuKeyboard = Markup.keyboard([
-  ['🛍 Mahsulotlar', '💰 Balans'],
-  ['📦 Mening buyurtmalarim', '📋 E’lonlarim'],
+  ['🛍 Mahsulotlar', '🔑 Kod bilan sotib olish'],
+  ['📦 Mening buyurtmalarim', '💰 Balans'],
   ['⚙️ Sozlamalar', '❓ Yordam'],
 ]).resize();
 
 export const sellerMenuKeyboard = Markup.keyboard([
-  ['➕ Yangi e’lon', '📋 Mening e’lonlarim'],
+  ['➕ Yangi e’lon', '🔑 Kod bilan sotib olish'],
+  ['📋 Mening e’lonlarim', '📦 Buyurtmalarim'],
   ['💰 Balans', '📊 Statistika'],
   ['⚙️ Sozlamalar', '🏠 Asosiy menu'],
 ]).resize();
+
+/** The fork every seller hits: escrow-only handover, or a public catalog listing. */
+export function sellModeButtons() {
+  return Markup.inlineKeyboard([
+    [Markup.button.callback('🤝 Kelishilgan bitim (kod bilan)', 'sell_mode_private')],
+    [Markup.button.callback('🛒 Bozorga qo‘yish', 'sell_mode_public')],
+  ]);
+}
+
+export function dealBuyButtons(productId: string) {
+  return Markup.inlineKeyboard([
+    [Markup.button.callback('💳 To‘lovni boshlash', `buy_${productId}`)],
+    [Markup.button.callback('❌ Bekor qilish', 'deal_abort')],
+  ]);
+}
 
 export const adminMenuKeyboard = Markup.keyboard([
   ['👥 Foydalanuvchilar', '📊 Statistika'],

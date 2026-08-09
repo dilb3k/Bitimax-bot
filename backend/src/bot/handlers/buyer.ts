@@ -1,4 +1,4 @@
-import { Composer } from 'telegraf';
+import { Composer, Scenes } from 'telegraf';
 import { User } from '../../models/User';
 import { Product } from '../../models/Product';
 import { EscrowHold } from '../../models/EscrowHold';
@@ -15,14 +15,104 @@ import { config } from '../../config';
 import { escapeHtml, formatUzs } from '../../utils/helpers';
 import {
   mainMenuKeyboard,
+  backButton,
   productActionButtons,
   revealButton,
   escrowActionButtons,
   refundReasonButtons,
   refundConfirmButtons,
+  dealBuyButtons,
 } from '../keyboards';
 
 export const buyerHandler = new Composer();
+
+export const CODE_WIZARD = 'deal_code';
+
+/**
+ * Scene where a buyer redeems a seller's deal code.
+ *
+ * The attempt counter matters: the code is the only thing standing between a stranger and a
+ * private deal, so an unlimited prompt would let someone sit here grinding guesses. Three
+ * tries and the scene closes.
+ */
+export function createCodeWizard() {
+  return new Scenes.WizardScene<any>(
+    CODE_WIZARD,
+    async (ctx: any) => {
+      ctx.session.codeTries = 0;
+      await ctx.replyWithHTML(
+        [
+          `<b>🔑 Bitim kodi</b>`,
+          '',
+          `Sotuvchi bergan 8 belgili kodni kiriting:`,
+          `<i>masalan: ABCD-2345</i>`,
+        ].join('\n'),
+        backButton()
+      );
+      return ctx.wizard.next();
+    },
+
+    async (ctx: any) => {
+      const raw = ctx.message?.text?.trim();
+      if (!raw) return;
+
+      if (/^(🏠|bekor|\/cancel)/i.test(raw)) {
+        await ctx.reply('Bekor qilindi.', mainMenuKeyboard);
+        return ctx.scene.leave();
+      }
+
+      const user = await User.findOne({ telegramId: ctx.from!.id });
+      if (!user) return ctx.scene.leave();
+
+      const deal = await botApi.findDealByCode(raw);
+
+      if (!deal) {
+        ctx.session.codeTries = (ctx.session.codeTries || 0) + 1;
+        if (ctx.session.codeTries >= 3) {
+          await ctx.reply(
+            'Kod 3 marta noto‘g‘ri kiritildi. Sotuvchidan kodni qayta so‘rang.',
+            mainMenuKeyboard
+          );
+          return ctx.scene.leave();
+        }
+        await ctx.reply(
+          `❌ Bunday kod topilmadi yoki bitim yopilgan. Qaytadan kiriting (${3 - ctx.session.codeTries} urinish qoldi):`
+        );
+        return;
+      }
+
+      if (String(deal.sellerId._id || deal.sellerId) === String(user._id)) {
+        await ctx.reply('Bu sizning o‘z bitimingiz — uni sotib ololmaysiz.', mainMenuKeyboard);
+        return ctx.scene.leave();
+      }
+
+      const seller = deal.sellerId as any;
+      const rating = seller?.sellerStats?.ratingCount
+        ? `⭐ ${(seller.sellerStats.ratingSum / seller.sellerStats.ratingCount).toFixed(1)}`
+        : 'yangi sotuvchi';
+
+      await ctx.replyWithHTML(
+        [
+          `<b>🤝 Bitim topildi</b>`,
+          '',
+          `<b>${escapeHtml(deal.title)}</b>`,
+          `Summa: <b>${formatUzs(deal.price)}</b>`,
+          `Sotuvchi: @${escapeHtml(seller?.username || 'noma’lum')} (${rating})`,
+          '',
+          `<b>🛡 Bitimax kafil bo‘ladi:</b>`,
+          `• Pulingiz sotuvchiga darhol o‘tmaydi`,
+          `• Avval akkauntni tekshirasiz`,
+          `• Muammo bo‘lsa — pul qaytariladi`,
+          '',
+          describeRefundPolicy(),
+        ].join('\n'),
+        dealBuyButtons(String(deal._id))
+      );
+
+      return ctx.scene.leave();
+    }
+  );
+}
 
 /**
  * Telegram callback_data is attacker-controllable — a crafted client can send arbitrary
@@ -265,7 +355,20 @@ buyerHandler.action(/^reveal_(.+)$/, async (ctx) => {
   }
 });
 
-buyerHandler.hears('📦 Mening buyurtmalarim', async (ctx) => {
+/**
+ * Entry point for a deal the buyer already agreed to off-platform: they type the seller's
+ * code and go straight to payment. Nothing about the deal is discoverable without the code.
+ */
+buyerHandler.hears(['🔑 Kod bilan sotib olish', '/kod'], async (ctx) => {
+  await (ctx as any).scene?.enter(CODE_WIZARD);
+});
+
+buyerHandler.action('deal_abort', async (ctx) => {
+  await ctx.answerCbQuery('Bekor qilindi');
+  await ctx.editMessageText('Bitim ochilmadi. Kod hali ham amal qiladi.', { parse_mode: 'HTML' });
+});
+
+buyerHandler.hears(['📦 Mening buyurtmalarim', '📦 Buyurtmalarim'], async (ctx) => {
   const user = await User.findOne({ telegramId: ctx.from!.id });
   if (!user) return;
 

@@ -5,6 +5,7 @@ import { Transaction } from '../../models/Transaction';
 import { EscrowHold } from '../../models/EscrowHold';
 import { paymentService } from '../../services/paymentService';
 import { config } from '../../config';
+import { generateDealCode, normalizeDealCode } from '../../utils/helpers';
 
 export class BlockedUserError extends Error {
   constructor(reason?: string) {
@@ -85,8 +86,83 @@ export class BotApiService {
     return product;
   }
 
+  /**
+   * Creates a private escrow deal: no catalog listing, no moderation, reachable only by the
+   * code the seller passes to the one buyer they already agreed with.
+   *
+   * Moderation is skipped deliberately. Its job is to protect strangers browsing a catalog
+   * from a fake listing; here there is no stranger — the buyer chose this seller and this
+   * account before Bitimax was involved, and all they want is the escrow in the middle.
+   */
+  async createDeal(data: {
+    sellerId: string;
+    title: string;
+    price: number;
+    description?: string;
+    category?: string;
+    login: string;
+    password: string;
+    recoveryCode?: string;
+  }) {
+    for (let attempt = 0; attempt < 10; attempt++) {
+      const dealCode = generateDealCode();
+      const product = new Product({
+        sellerId: data.sellerId,
+        title: data.title,
+        description: data.description || `Kelishilgan bitim: ${data.title}`,
+        price: data.price,
+        category: data.category || 'Boshqa',
+        listingType: 'private',
+        dealCode,
+        // An unclaimed code shouldn't stay live forever — the seller's credentials are sitting
+        // in it. A week is long enough for any real handover.
+        dealExpiresAt: new Date(Date.now() + 7 * 24 * 3600_000),
+        status: 'active',
+      });
+
+      product.setCredentials({
+        login: data.login,
+        password: data.password,
+        recoveryCode: data.recoveryCode,
+      });
+
+      try {
+        await product.save();
+        await User.findByIdAndUpdate(data.sellerId, { $inc: { 'sellerStats.listed': 1 } });
+        return product;
+      } catch (err: any) {
+        // E11000 = the generated code collided with an existing one; draw another.
+        if (err?.code === 11000) continue;
+        throw err;
+      }
+    }
+    throw new Error('Bitim kodini yaratib bo‘lmadi, qayta urinib ko‘ring');
+  }
+
+  /** Resolves a buyer-typed code to a live deal. Returns null for anything not purchasable. */
+  async findDealByCode(code: string) {
+    const normalized = normalizeDealCode(code);
+    if (normalized.length !== 8) return null;
+
+    return Product.findOne({
+      dealCode: normalized,
+      listingType: 'private',
+      status: { $in: ['active', 'reserved'] },
+    }).populate('sellerId', 'telegramId username trustLevel sellerStats');
+  }
+
+  /** Seller cancels their own unclaimed deal, invalidating the code. */
+  async cancelDeal(productId: string, sellerId: string) {
+    return Product.findOneAndUpdate(
+      { _id: productId, sellerId, listingType: 'private', status: 'active' },
+      { $set: { status: 'archived' }, $unset: { dealCode: '' } },
+      { new: true }
+    );
+  }
+
   async getActiveProducts(page = 1, limit = 10, category?: string) {
-    const filter: Record<string, unknown> = { status: 'active' };
+    // Public catalog only — a private deal is reachable by its code and nowhere else.
+    const filter: Record<string, unknown> = { status: 'active', listingType: 'public' };
     if (category) filter.category = category;
 
     const [products, total] = await Promise.all([

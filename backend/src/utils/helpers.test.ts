@@ -9,6 +9,9 @@ import {
   maskCard,
   isValidUzCard,
   escapeHtml,
+  generateDealCode,
+  normalizeDealCode,
+  formatDealCode,
 } from './helpers';
 
 test('parses the amount out of real-world UZS bank SMS shapes', () => {
@@ -89,6 +92,33 @@ test('card validation requires sixteen digits', () => {
   assert.equal(isValidUzCard('8600 1234 5678 9012'), true);
   assert.equal(isValidUzCard('8600123456789012'), true);
   assert.equal(isValidUzCard('86001234567890'), false);
+});
+
+test('deal codes avoid characters people misread when retyping', () => {
+  // The code gets read aloud and forwarded in chat, so I/O/0/1 must never appear.
+  for (let i = 0; i < 500; i++) {
+    const code = generateDealCode();
+    assert.equal(code.length, 8);
+    assert.match(code, /^[A-HJ-NP-Z2-9]+$/, `ambiguous character in ${code}`);
+  }
+});
+
+test('deal codes do not repeat across a large sample', () => {
+  const codes = new Set<string>();
+  for (let i = 0; i < 2000; i++) codes.add(generateDealCode());
+  assert.equal(codes.size, 2000);
+});
+
+test('a buyer can type the code however they like', () => {
+  // Whatever the seller pasted and the buyer retyped has to land on the same stored value.
+  for (const input of ['ABCD2345', 'abcd-2345', 'ABCD 2345', ' abcd2345 ', 'AbCd-23 45']) {
+    assert.equal(normalizeDealCode(input), 'ABCD2345', `failed on: ${input}`);
+  }
+});
+
+test('deal codes are displayed in two groups', () => {
+  assert.equal(formatDealCode('ABCD2345'), 'ABCD-2345');
+  assert.equal(formatDealCode('abcd-2345'), 'ABCD-2345');
 });
 
 test('user text cannot inject markup into a Telegram HTML message', () => {

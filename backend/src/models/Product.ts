@@ -1,5 +1,5 @@
 import mongoose, { Schema, Document } from 'mongoose';
-import { ProductStatus } from '../types';
+import { ProductStatus, ListingType } from '../types';
 import { encryptSecret, decryptSecret } from '../utils/crypto';
 
 export interface ISensitiveData {
@@ -21,6 +21,16 @@ export interface IProduct extends Document {
   sensitiveData: ISensitiveData;
   /** Set once credentials are wiped after the retention window. */
   credentialsPurgedAt?: Date;
+
+  /**
+   * `public` listings go through moderation into the catalog. `private` ones are a direct
+   * deal between two people who already agreed — reachable only by `dealCode`, never listed.
+   */
+  listingType: ListingType;
+  /** Human-typable code the seller hands to their agreed buyer. Only set for private deals. */
+  dealCode?: string;
+  /** Private deals that nobody claims are archived by the sweeper at this time. */
+  dealExpiresAt?: Date;
 
   status: ProductStatus;
   moderationNote?: string;
@@ -68,6 +78,12 @@ const ProductSchema = new Schema<IProduct>(
     },
     credentialsPurgedAt: { type: Date },
 
+    listingType: { type: String, enum: ['public', 'private'], default: 'public', index: true },
+    // Sparse so the unique constraint applies only to deals that actually carry a code —
+    // every public listing leaves this unset and they must not collide with each other.
+    dealCode: { type: String, unique: true, sparse: true, uppercase: true, trim: true },
+    dealExpiresAt: { type: Date },
+
     status: {
       type: String,
       enum: [
@@ -103,9 +119,12 @@ const ProductSchema = new Schema<IProduct>(
   { timestamps: true }
 );
 
-// Catalog listing: active products by category, newest or cheapest first.
-ProductSchema.index({ status: 1, category: 1, createdAt: -1 });
-ProductSchema.index({ status: 1, price: 1 });
+// Catalog listing: active PUBLIC products by category, newest or cheapest first. listingType
+// leads the key because every catalog query filters on it — a private deal must never surface.
+ProductSchema.index({ listingType: 1, status: 1, category: 1, createdAt: -1 });
+ProductSchema.index({ listingType: 1, status: 1, price: 1 });
+// Unclaimed private deals, for the expiry sweeper.
+ProductSchema.index({ listingType: 1, status: 1, dealExpiresAt: 1 });
 // Text search across the buyer-visible fields, replacing the unindexed $regex scan.
 ProductSchema.index({ title: 'text', description: 'text', tags: 'text' });
 // Lets the sweeper find lapsed reservations cheaply.
