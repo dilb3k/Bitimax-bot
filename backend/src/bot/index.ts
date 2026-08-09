@@ -193,7 +193,13 @@ async function launchWithRetry(bot: Telegraf<any>): Promise<void> {
 
       // Cap the wait at 30s: a deploy overlap clears in well under a minute, and a longer
       // backoff would just extend the window where the bot answers nobody.
-      const waitMs = Math.min(30_000, 3_000 * 2 ** Math.min(attempt - 1, 4));
+      //
+      // The jitter is what actually breaks the deadlock. Both instances run this same loop,
+      // so a purely deterministic backoff has them wake in lockstep and collide again and
+      // again — observed in production as four straight rounds of mutual 409s. Randomising
+      // the wait means one of them reaches Telegram alone on the next attempt.
+      const base = Math.min(30_000, 3_000 * 2 ** Math.min(attempt - 1, 4));
+      const waitMs = Math.round(base * (0.5 + Math.random()));
       console.warn(
         `[Bot] Polling failed (${isConflict ? '409 conflict — another instance is still polling' : code || 'unknown'}). ` +
           `Retry ${attempt}/${MAX_ATTEMPTS} in ${Math.round(waitMs / 1000)}s`
