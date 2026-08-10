@@ -147,7 +147,23 @@ export const config = {
   // Background jobs run in this process by default. Set to false on extra replicas so
   // only one instance sweeps expiries / auto-releases.
   jobsEnabled: process.env.JOBS_ENABLED !== 'false',
+
+  /**
+   * Lets one account both sell and buy the same item, so a single Telegram account can walk
+   * the whole flow end to end. Off by default and meant to stay off in normal operation: a
+   * self-purchase costs the buyer only the 7% commission but still increments
+   * `sellerStats.sold`, which is how trust levels — and with them the price ceiling — are
+   * earned. Left on, it is a free path to "trusted" seller.
+   */
+  allowSelfPurchase: process.env.ALLOW_SELF_PURCHASE === 'true',
 };
+
+if (config.allowSelfPurchase) {
+  console.warn(
+    '[Config] ALLOW_SELF_PURCHASE=true — o‘z mahsulotini sotib olish YOQILGAN. ' +
+      'Bu faqat sinov uchun; ishlab chiqarishda o‘chiring.'
+  );
+}
 
 /** True for the platform owner and any additional configured admin telegram id. */
 export function isAdminTelegramId(telegramId: number | string): boolean {

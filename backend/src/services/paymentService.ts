@@ -82,7 +82,9 @@ export class PaymentService {
 
     if (!product) throw new ProductUnavailableError();
 
-    if (String(product.sellerId) === String(buyerId)) {
+    // Blocked by default: a self-purchase costs only the commission but still counts as a
+    // completed sale, which is how trust levels and price ceilings are earned.
+    if (!config.allowSelfPurchase && String(product.sellerId) === String(buyerId)) {
       await this.releaseReservation(String(product._id));
       throw new ForbiddenError('O‘z mahsulotingizni sotib ololmaysiz');
     }

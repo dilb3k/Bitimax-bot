@@ -81,9 +81,15 @@ export function createCodeWizard() {
         return;
       }
 
-      if (String(deal.sellerId._id || deal.sellerId) === String(user._id)) {
+      const isOwnDeal = String((deal.sellerId as any)._id || deal.sellerId) === String(user._id);
+      if (isOwnDeal && !config.allowSelfPurchase) {
         await ctx.reply('Bu sizning o‘z bitimingiz — uni sotib ololmaysiz.', mainMenuKeyboard);
         return ctx.scene.leave();
+      }
+      if (isOwnDeal) {
+        await ctx.replyWithHTML(
+          '🧪 <b>Sinov rejimi</b> — bu o‘z bitimingiz. Odatda bunga ruxsat berilmaydi.'
+        );
       }
 
       const seller = deal.sellerId as any;
