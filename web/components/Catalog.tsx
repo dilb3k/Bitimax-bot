@@ -107,7 +107,7 @@ export function Catalog() {
               }}
               className={`rounded-md px-3 py-1.5 text-sm transition ${
                 sort === option.value
-                  ? 'bg-seal-soft font-medium text-ink'
+                  ? 'bg-accent-soft font-medium text-ink'
                   : 'text-muted hover:text-ink'
               }`}
             >
@@ -263,7 +263,7 @@ function Pager({
             aria-current={n === page ? 'page' : undefined}
             className={`tnum h-10 w-10 rounded-lg text-sm font-medium transition ${
               n === page
-                ? 'bg-seal text-[rgb(var(--seal-ink))]'
+                ? 'bg-accent text-[rgb(var(--accent-ink))]'
                 : 'border border-line bg-surface text-muted hover:text-ink'
             }`}
           >

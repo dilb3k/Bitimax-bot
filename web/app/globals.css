@@ -3,47 +3,52 @@
 @tailwind utilities;
 
 /*
- * Palette: a sealed strongbox, not a fintech dashboard.
+ * Palette derived from the logo: cyan #22d3ee and slate #64748b — the two halves of the mark,
+ * buyer and seller shaking hands.
  *
- * The whole product is "your money is held under seal until you say otherwise", so the accent
- * is a burnished gold — the colour of a wax seal and a guarantee stamp — against a warm paper
- * ground in light and a deep cool ink in dark. Neutrals are biased slightly warm toward the
- * accent so they read as chosen rather than inherited from a framework default.
+ * Those two hexes are used where each actually works. #22d3ee is a light, high-chroma cyan: it
+ * sings on a dark ground but carries white button text at only ~1.9:1 on white, far under AA,
+ * so light mode steps the accent down to cyan-700 and keeps the bright value for dark. #64748b
+ * is exactly slate-500, so the whole neutral ramp is the slate family rather than a grey picked
+ * to sit next to it — the greys and the brand share one hue.
  */
 @layer base {
   :root {
-    --ground: 250 248 244; /* warm paper */
+    --ground: 248 250 252; /* slate-50 */
     --surface: 255 255 255;
-    --raised: 244 241 235;
-    --line: 226 220 210;
-    --ink: 22 24 28;
-    --muted: 106 100 92;
-    --faint: 150 143 133;
-    /*
-     * Deep burnished bronze rather than a bright gold. A lighter gold looks better in
-     * isolation but carries white button text at only ~4.2:1 — under AA — and the primary
-     * CTA is the one thing on the page that must never be hard to read.
-     */
-    --seal: 138 92 20; /* white text on this: ~7.0:1 */
-    --seal-soft: 244 231 205;
-    --seal-ink: 255 255 255; /* text on a seal-filled surface */
-    --vault: 21 110 78;
-    --warn: 170 62 34;
+    --raised: 241 245 249; /* slate-100 */
+    --line: 226 232 240; /* slate-200 */
+    --ink: 15 23 42; /* slate-900 */
+    --muted: 71 85 105; /* slate-600 */
+    --faint: 148 163 184; /* slate-400 */
+
+    --accent: 14 116 144; /* cyan-700 — white text on this is ~5.3:1 */
+    --accent-hover: 21 94 117; /* cyan-800 */
+    --accent-soft: 207 250 254; /* cyan-100 */
+    --accent-ink: 255 255 255; /* text on an accent-filled surface */
+    --accent-line: 103 232 249; /* cyan-300 */
+
+    --ok: 4 120 87; /* emerald-700 */
+    --warn: 190 18 60; /* rose-700 */
   }
 
   .dark {
-    --ground: 15 18 22;
-    --surface: 22 26 32;
-    --raised: 30 35 42;
-    --line: 46 53 62;
-    --ink: 238 235 230;
-    --muted: 158 152 144;
-    --faint: 116 111 104;
-    --seal: 216 156 61; /* lightened so it stays legible on ink */
-    --seal-soft: 58 44 22;
-    --seal-ink: 20 16 8;
-    --vault: 74 190 143;
-    --warn: 232 122 92;
+    --ground: 2 6 23; /* slate-950 */
+    --surface: 15 23 42; /* slate-900 */
+    --raised: 30 41 59; /* slate-800 */
+    --line: 51 65 85; /* slate-700 */
+    --ink: 226 232 240; /* slate-200 */
+    --muted: 148 163 184; /* slate-400 */
+    --faint: 100 116 139; /* slate-500 — the brand's second colour, in its natural role */
+
+    --accent: 34 211 238; /* cyan-400 — the brand colour, at full strength */
+    --accent-hover: 103 232 249; /* cyan-300 */
+    --accent-soft: 22 78 99; /* cyan-900 */
+    --accent-ink: 8 47 73; /* dark text on a bright cyan fill */
+    --accent-line: 8 145 178; /* cyan-600 */
+
+    --ok: 52 211 153; /* emerald-400 */
+    --warn: 251 113 133; /* rose-400 */
   }
 
   * {
@@ -76,13 +81,13 @@
   }
 
   :focus-visible {
-    outline: 2px solid rgb(var(--seal));
+    outline: 2px solid rgb(var(--accent));
     outline-offset: 2px;
     border-radius: 4px;
   }
 
   ::selection {
-    background: rgb(var(--seal) / 0.25);
+    background: rgb(var(--accent) / 0.25);
   }
 }
 
@@ -91,8 +96,8 @@
     @apply inline-flex items-center justify-center gap-2 rounded-lg font-medium
            transition-colors duration-150 disabled:opacity-45 disabled:cursor-not-allowed;
   }
-  .btn-seal {
-    @apply btn bg-seal text-[rgb(var(--seal-ink))] hover:brightness-110 px-4 py-2.5;
+  .btn-accent {
+    @apply btn bg-accent text-[rgb(var(--accent-ink))] hover:bg-accent-hover px-4 py-2.5;
   }
   .btn-ghost {
     @apply btn border border-line bg-surface text-ink hover:bg-raised px-4 py-2.5;
@@ -101,16 +106,16 @@
   .field {
     @apply w-full rounded-lg border border-line bg-surface px-3.5 py-2.5 text-ink
            placeholder:text-faint outline-none transition
-           focus:border-seal focus:ring-2 focus:ring-seal/25;
+           focus:border-accent focus:ring-2 focus:ring-accent/25;
   }
 
   .chip {
     @apply inline-flex items-center gap-1.5 whitespace-nowrap rounded-full border border-line
            bg-surface px-3 py-1.5 text-sm text-muted transition
-           hover:border-seal/50 hover:text-ink;
+           hover:border-accent/50 hover:text-ink;
   }
   .chip-on {
-    @apply border-seal/60 bg-seal-soft text-ink;
+    @apply border-accent/60 bg-accent-soft text-ink;
   }
 
   .surface {

@@ -9,19 +9,19 @@ import { PlatformStats, botLink, formatUzs } from '@/lib/api';
 export function Hero({ stats }: { stats: PlatformStats | null }) {
   return (
     <section className="relative overflow-hidden border-b border-line">
-      {/* Warm seal-coloured wash, kept faint so the type stays the loudest thing here. */}
+      {/* Faint cyan wash, kept low so the type stays the loudest thing on the screen. */}
       <div
         aria-hidden="true"
         className="pointer-events-none absolute inset-0 opacity-[0.55]"
         style={{
           background:
-            'radial-gradient(60rem 28rem at 12% -10%, rgb(var(--seal) / .16), transparent 60%)',
+            'radial-gradient(60rem 28rem at 12% -10%, rgb(var(--accent) / .16), transparent 60%)',
         }}
       />
 
       <div className="relative mx-auto max-w-6xl px-5 pb-16 pt-14 sm:px-8 sm:pb-20 sm:pt-20">
-        <p className="mb-5 inline-flex items-center gap-2 rounded-full border border-seal/30 bg-seal-soft px-3 py-1.5 text-xs font-medium text-ink">
-          <span className="inline-block h-1.5 w-1.5 rounded-full bg-seal" />
+        <p className="mb-5 inline-flex items-center gap-2 rounded-full border border-accent/30 bg-accent-soft px-3 py-1.5 text-xs font-medium text-ink">
+          <span className="inline-block h-1.5 w-1.5 rounded-full bg-accent" />
           P2P Escrow · Kafil xizmati
         </p>
 
@@ -36,7 +36,7 @@ export function Hero({ stats }: { stats: PlatformStats | null }) {
         </p>
 
         <div className="mt-8 flex flex-wrap items-center gap-3">
-          <a href={botLink()} target="_blank" rel="noopener noreferrer" className="btn-seal">
+          <a href={botLink()} target="_blank" rel="noopener noreferrer" className="btn-accent">
             Telegram botni ochish
           </a>
           <a href="#katalog" className="btn-ghost">
@@ -79,7 +79,7 @@ function Steps() {
     <ol className="mt-12 grid gap-px overflow-hidden rounded-card border border-line bg-line sm:grid-cols-3">
       {steps.map((step) => (
         <li key={step.n} className="bg-surface p-5">
-          <span className="tnum block text-xs font-bold tracking-[0.14em] text-seal">{step.n}</span>
+          <span className="tnum block text-xs font-bold tracking-[0.14em] text-accent">{step.n}</span>
           <h2 className="mt-2 text-base font-semibold text-ink">{step.title}</h2>
           <p className="mt-1.5 text-sm leading-relaxed text-muted">{step.body}</p>
         </li>
@@ -152,7 +152,7 @@ export function RefundPolicy({ exampleAmount = 1_000_000 }: { exampleAmount?: nu
                   <span
                     className={
                       row.back === 100
-                        ? 'font-semibold text-vault'
+                        ? 'font-semibold text-ok'
                         : row.back === 0
                           ? 'font-semibold text-warn'
                           : 'font-semibold text-ink'

@@ -35,7 +35,7 @@ export function DealCode() {
                 'Xaridor akkauntni tekshiradi va tasdiqlaydi — pul sotuvchiga o‘tadi.',
               ].map((step, index) => (
                 <li key={step} className="flex gap-3.5">
-                  <span className="tnum mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-seal-soft text-xs font-bold text-ink">
+                  <span className="tnum mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-accent-soft text-xs font-bold text-ink">
                     {index + 1}
                   </span>
                   <span className="text-sm leading-relaxed text-muted">{step}</span>
@@ -47,7 +47,7 @@ export function DealCode() {
               href={botLink()}
               target="_blank"
               rel="noopener noreferrer"
-              className="btn-seal mt-8"
+              className="btn-accent mt-8"
             >
               Bitim yaratish
             </a>
@@ -72,7 +72,7 @@ function CodeVisual() {
         className="pointer-events-none absolute inset-0 opacity-70"
         style={{
           background:
-            'radial-gradient(24rem 16rem at 85% 0%, rgb(var(--seal) / .14), transparent 65%)',
+            'radial-gradient(24rem 16rem at 85% 0%, rgb(var(--accent) / .14), transparent 65%)',
         }}
       />
 
@@ -112,7 +112,7 @@ function CodeVisual() {
         </div>
 
         <div className="flex gap-2">
-          <span className="flex-1 rounded-lg bg-vault px-3 py-2.5 text-center text-sm font-medium text-white">
+          <span className="flex-1 rounded-lg bg-ok px-3 py-2.5 text-center text-sm font-medium text-white">
             Tasdiqlayman
           </span>
           <span className="flex-1 rounded-lg border border-line px-3 py-2.5 text-center text-sm font-medium text-muted">
@@ -141,7 +141,7 @@ function Row({
       <span
         className={
           tone === 'seal'
-            ? 'font-medium text-seal'
+            ? 'font-medium text-accent'
             : strong
               ? 'tnum font-semibold text-ink'
               : 'text-muted'

@@ -9,7 +9,7 @@ export function Header() {
     <header className="sticky top-0 z-40 border-b border-line bg-ground/85 backdrop-blur-md">
       <div className="mx-auto flex h-16 max-w-6xl items-center justify-between gap-4 px-5 sm:px-8">
         <a href="/" className="flex items-center gap-2.5">
-          <Logo />
+          <Logo priority />
           <span className="hidden text-xs text-faint sm:inline">kafil bilan savdo</span>
         </a>
 
@@ -28,7 +28,7 @@ export function Header() {
             href={botLink()}
             target="_blank"
             rel="noopener noreferrer"
-            className="btn-seal px-3.5 py-2 text-sm"
+            className="btn-accent px-3.5 py-2 text-sm"
           >
             Botni ochish
           </a>
