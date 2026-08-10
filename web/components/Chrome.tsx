@@ -2,15 +2,14 @@
 
 import { useEffect, useState } from 'react';
 import { botLink } from '@/lib/api';
+import { Logo, LogoMark } from './Logo';
 
 export function Header() {
   return (
     <header className="sticky top-0 z-40 border-b border-line bg-ground/85 backdrop-blur-md">
       <div className="mx-auto flex h-16 max-w-6xl items-center justify-between gap-4 px-5 sm:px-8">
-        <a href="/" className="flex items-baseline gap-2">
-          <span className="font-display text-xl font-extrabold tracking-tight text-ink">
-            Bitimax
-          </span>
+        <a href="/" className="flex items-center gap-2.5">
+          <Logo />
           <span className="hidden text-xs text-faint sm:inline">kafil bilan savdo</span>
         </a>
 
@@ -96,7 +95,10 @@ export function Footer() {
       <div className="mx-auto max-w-6xl px-5 py-10 sm:px-8">
         <div className="flex flex-col gap-6 sm:flex-row sm:items-start sm:justify-between">
           <div className="max-w-sm">
-            <p className="font-display text-lg font-bold text-ink">Bitimax</p>
+            <div className="mb-2 flex items-center gap-2.5">
+              <LogoMark size={26} />
+              <p className="font-display text-lg font-bold text-ink">Bitimax</p>
+            </div>
             <p className="mt-2 text-sm leading-relaxed text-muted">
               P2P escrow bozori. Pul kafilda saqlanadi, xaridor tasdiqlagach sotuvchiga o‘tadi.
             </p>

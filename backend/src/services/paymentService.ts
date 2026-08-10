@@ -157,7 +157,7 @@ export class PaymentService {
         rawText: smsText,
         hash,
         sender,
-        receivedAt: receivedAt ? new Date(receivedAt) : new Date(),
+        receivedAt: parseReceivedAt(receivedAt),
         status: 'unmatched',
       });
     } catch (err: any) {
@@ -616,6 +616,33 @@ export class PaymentService {
 
     await buyer.save();
   }
+}
+
+/**
+ * Timestamp from the SMS forwarder, which is a phone we do not control.
+ *
+ * `new Date(x)` happily returns an Invalid Date for anything it can't parse, and Mongoose then
+ * rejects the whole insert — so one oddly-formatted timestamp from the gateway would make the
+ * webhook 500 and a real, already-transferred payment would never be recorded. The arrival time
+ * is metadata; it must never be able to block ingestion. Anything unparseable falls back to now.
+ */
+function parseReceivedAt(value?: string | number): Date {
+  if (value === undefined || value === null || value === '') return new Date();
+
+  // Bare digits are epoch seconds or milliseconds depending on the forwarder app.
+  if (typeof value === 'number' || /^\d+$/.test(String(value))) {
+    const n = Number(value);
+    const ms = n < 1e12 ? n * 1000 : n;
+    const fromEpoch = new Date(ms);
+    return Number.isNaN(fromEpoch.getTime()) ? new Date() : fromEpoch;
+  }
+
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) {
+    console.warn('[Payment] Unparseable received_at from SMS gateway, using arrival time:', value);
+    return new Date();
+  }
+  return parsed;
 }
 
 function pickCard() {

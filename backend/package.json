@@ -10,7 +10,8 @@
     "bot:build": "tsc && node dist/bot/index.js",
     "migrate": "tsx src/scripts/migrate.ts",
     "test": "node --import tsx --test \"src/**/*.test.ts\"",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "e2e": "tsx src/scripts/e2e.ts"
   },
   "dependencies": {
     "cors": "^2.8.5",
